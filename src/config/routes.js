@@ -67,7 +67,6 @@ function registerRoutes(app, basePath) {
       "🔐 Access point secured! Only those with the key may proceed. Do you dare to unlock the secrets within? 🚀"
     );
   });
-
   // Main API Swagger setup with useSchema function
   app.use(
     `${basePath}/api-docs`,
