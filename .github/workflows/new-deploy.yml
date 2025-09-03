@@ -1,4 +1,4 @@
-name: UAT Loyalty Backend
+name: PROD Loyalty Backend
 
 on:
   push:
