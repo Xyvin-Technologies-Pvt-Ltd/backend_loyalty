@@ -3,12 +3,12 @@ name: UAT Loyalty Backend
 on:
   push:
     branches:
-      - main
+      - prod
 
 jobs:
   deploy-backend:
     name: Deploy Backend to VPN Server
-    runs-on: self-hosted
+    runs-on: [self-hosted, loyalty-app-prod, Linux, x64, backend, prod]
 
     steps:
       # Step 1: Checkout the repository
