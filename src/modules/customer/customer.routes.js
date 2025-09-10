@@ -7,6 +7,7 @@ const {
   updateCustomer,
   deleteCustomer,
   getCustomerDashboard,
+  importCustomersFromExcel,
 } = require("./customer.controllers");
 const { authorizePermission } = require("../../middlewares/auth/auth");
 const { createAuditMiddleware } = require("../audit");
@@ -15,7 +16,10 @@ const {
   cacheKeys,
   cachePatterns,
 } = require("../../middlewares/redis_cache/cache.middleware");
-const { cacheInvalidationMiddleware,enhancedCacheInvalidationMiddleware } = require("../../middlewares/redis_cache/cache_invalidation.middleware");
+const {
+  cacheInvalidationMiddleware,
+  enhancedCacheInvalidationMiddleware,
+} = require("../../middlewares/redis_cache/cache_invalidation.middleware");
 // Create audit middleware for customers
 const customerAudit = createAuditMiddleware("customer");
 
@@ -104,5 +108,8 @@ router.delete(
   ),
   deleteCustomer
 );
+
+// Import customers from Excel endpoint
+router.post("/import-excel", importCustomersFromExcel);
 
 module.exports = router;

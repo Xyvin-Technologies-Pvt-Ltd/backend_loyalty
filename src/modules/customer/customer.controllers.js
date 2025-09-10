@@ -3,9 +3,9 @@ const Transaction = require("../../models/transaction_model");
 const LoyaltyPoints = require("../../models/loyalty_points_model");
 const Tier = require("../../models/tier_model");
 const { logger } = require("../../middlewares/logger");
-const response_handler  = require("../../helpers/response_handler"); 
+const response_handler = require("../../helpers/response_handler");
 const mongoose = require("mongoose");
-
+const XLSX = require("xlsx");
 /**
  * Create a new customer
  * @param {Object} req - Express request object
@@ -13,7 +13,8 @@ const mongoose = require("mongoose");
  */
 const createCustomer = async (req, res) => {
   try {
-    const { name, email, phone, app_type ,device_token,device_type} = req.body;
+    const { name, email, phone, app_type, device_token, device_type } =
+      req.body;
 
     // Check if customer with email or phone already exists
     const existingCustomer = await Customer.findOne({
@@ -38,7 +39,9 @@ const createCustomer = async (req, res) => {
     const referral_code = generateReferralCode(name);
 
     //find basic tier based on least point required
-    const basicTier = await Tier.findOne({ points_required: { $gt: 0 } }).sort({ points_required: 1 });
+    const basicTier = await Tier.findOne({ points_required: { $gt: 0 } }).sort({
+      points_required: 1,
+    });
 
     // Create the customer
     const customer = new Customer({
@@ -110,9 +113,8 @@ const getAllCustomers = async (req, res) => {
     const sort = {};
     sort[sort_by] = sort_order === "asc" ? 1 : -1;
 
-
     // Execute query with pagination
-  
+
     const customers = await Customer.aggregate([
       { $match: filter },
 
@@ -140,7 +142,7 @@ const getAllCustomers = async (req, res) => {
           name: 1,
           email: 1,
           phone: 1,
-          points: 1,  // 👈 include points field
+          points: 1, // 👈 include points field
           tier: { $arrayElemAt: ["$tier", 0] }, // flatten array
           app_type: { $arrayElemAt: ["$app_type", 0] }, // flatten array
         },
@@ -212,7 +214,7 @@ const getCustomerById = async (req, res) => {
 const updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, app_type, status,tier } = req.body;
+    const { name, email, phone, app_type, status, tier } = req.body;
 
     // Check if customer exists
     const customer = await Customer.findById(id);
@@ -253,7 +255,7 @@ const updateCustomer = async (req, res) => {
     // Update customer
     const updatedCustomer = await Customer.findByIdAndUpdate(
       id,
-      { name, email, phone, app_type, status,tier },
+      { name, email, phone, app_type, status, tier },
       { new: true, runValidators: true }
     )
       .populate("tier", "name description points_required")
@@ -473,6 +475,120 @@ const generateReferralCode = (name) => {
   return `${namePrefix}${randomString}`;
 };
 
+const importCustomersFromExcel = async (req, res) => {
+  try {
+    const filePath = "./src/modules/customer/tier-up.xlsx";
+    const batchSize = parseInt(req.query.batchSize) || 50; // Default batch size of 50
+
+    // 1. Read Excel file
+    console.log(`📂 Reading Excel file from ${filePath}`);
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    let successCount = 0;
+    let errorCount = 0;
+    const errors = [];
+    const totalRows = sheetData.length;
+
+    console.log(`📊 Processing ${totalRows} rows in batches of ${batchSize}`);
+
+    // 2. Process in batches
+    for (let i = 0; i < sheetData.length; i += batchSize) {
+      const batch = sheetData.slice(i, i + batchSize);
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(sheetData.length / batchSize);
+
+      console.log(
+        `🔄 Processing batch ${batchNumber}/${totalBatches} (${batch.length} records)`
+      );
+
+      // Process each batch
+      const batchPromises = batch.map(async (row, index) => {
+        const rowNumber = i + index + 1;
+        const customerId = row.CustomerID?.trim();
+        const tierName = row.Tier?.trim();
+
+        if (!customerId || !tierName) {
+          return {
+            success: false,
+            error: `Row ${rowNumber}: Missing CustomerID or Tier`,
+            customerId: customerId || "N/A",
+          };
+        }
+
+        try {
+          // Find tier by name
+          const tier = await Tier.findOne({ "name.en": tierName });
+          if (!tier) {
+            return {
+              success: false,
+              error: `Customer ${customerId}: Tier '${tierName}' not found`,
+              customerId,
+            };
+          }
+
+          // Upsert (create/update) customer
+          await Customer.findOneAndUpdate(
+            { customer_id: customerId },
+            { customer_id: customerId, tier: tier._id },
+            { upsert: true, new: true }
+          );
+
+          return {
+            success: true,
+            customerId,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: `Customer ${customerId}: ${error.message}`,
+            customerId,
+          };
+        }
+      });
+
+      // Wait for batch to complete
+      const batchResults = await Promise.all(batchPromises);
+
+      // Process batch results
+      batchResults.forEach((result) => {
+        if (result.success) {
+          successCount++;
+          console.log(`✅ Customer ${result.customerId} imported successfully`);
+        } else {
+          errorCount++;
+          errors.push(result.error);
+          console.error(`❌ ${result.error}`);
+        }
+      });
+
+      // Add a small delay between batches to prevent overwhelming the database
+      if (i + batchSize < sheetData.length) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+
+    console.log(
+      `✅ Import completed: ${successCount} successful, ${errorCount} errors`
+    );
+
+    return response_handler(res, 200, "Import completed successfully", {
+      totalProcessed: totalRows,
+      successCount,
+      errorCount,
+      batchSize,
+      totalBatches: Math.ceil(totalRows / batchSize),
+      errors: errors.slice(0, 10), // Return first 10 errors
+    });
+  } catch (error) {
+    console.error("❌ Error importing customers:", error);
+    return response_handler(res, 500, "Error importing customers", {
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createCustomer,
   getAllCustomers,
@@ -480,4 +596,5 @@ module.exports = {
   updateCustomer,
   deleteCustomer,
   getCustomerDashboard,
+  importCustomersFromExcel,
 };

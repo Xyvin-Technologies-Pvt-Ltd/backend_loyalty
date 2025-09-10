@@ -8,7 +8,6 @@ const {
 const { generate_admin_token } = require("../../utils/generate_admin_token");
 const validator = require("./auth.validator");
 
-
 //for admin only
 exports.signup = async (req, res) => {
   try {
@@ -46,8 +45,11 @@ exports.admin_login = async (req, res) => {
       const error_messages = error.details.map((err) => err.message).join(", ");
       return response_handler(res, 400, `Invalid input: ${error_messages}`);
     }
-
+    const admin = await Admin.find({});
+    console.log(admin);
     const user = await Admin.findOne({ email: req.body.email });
+    console.log(user);
+    console.log(req.body.email);
     if (!user) {
       return response_handler(res, 400, "User not found.");
     }
@@ -74,8 +76,16 @@ exports.admin_login = async (req, res) => {
 
 exports.getMe = async (req, res) => {
   try {
-    const user = await Admin.findById(req.admin._id, 'name email _id status role').populate('role');
-    return response_handler(res, 200, "User details retrieved successfully", user);
+    const user = await Admin.findById(
+      req.admin._id,
+      "name email _id status role"
+    ).populate("role");
+    return response_handler(
+      res,
+      200,
+      "User details retrieved successfully",
+      user
+    );
   } catch (error) {
     return response_handler(
       res,
@@ -85,13 +95,16 @@ exports.getMe = async (req, res) => {
   }
 };
 
-
 exports.logout = async (req, res) => {
   try {
     res.clearCookie("token");
     return response_handler(res, 200, "Logout successful!");
   } catch (error) {
-    return response_handler(res, 500, `Internal Server Error. ${error.message}`);
+    return response_handler(
+      res,
+      500,
+      `Internal Server Error. ${error.message}`
+    );
   }
 };
 

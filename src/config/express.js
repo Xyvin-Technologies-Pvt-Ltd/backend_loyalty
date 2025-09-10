@@ -49,6 +49,7 @@ function initializeExpress() {
   app.use(
     cors({
       origin: [
+        "http://khedmahloyalty.oifcoman.com:3737",
         "http://uat-loyalty.xyvin.com",
         "http://localhost:3000",
         "http://localhost:5173",
