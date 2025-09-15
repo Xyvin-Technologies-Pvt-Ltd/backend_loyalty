@@ -47,6 +47,7 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
     // Perform FIFO redemption
     let remainingPointsToRedeem = pointsToRedeem;
     let actualRedeemedPoints = 0;
+    let usedLoyaltyPoints = [];
 
     for (const pointEntry of validPoints) {
       if (remainingPointsToRedeem <= 0) break;
@@ -66,8 +67,17 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
           },
           { session }
         );
+        usedLoyaltyPoints.push({
+          loyalty_point_id: pointEntry._id,
+          original_points: pointEntry.points,
+          points_used: pointEntry.points,
+          fully_redeemed: true,
+          expiryDate: pointEntry.expiryDate,
+          earnedAt: pointEntry.earnedAt,
+        });
       } else {
         // Partially redeem point entry
+        const pointsToUse = remainingPointsToRedeem;
         actualRedeemedPoints += remainingPointsToRedeem;
         pointEntry.points -= remainingPointsToRedeem;
         remainingPointsToRedeem = 0;
@@ -78,6 +88,14 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
           { points: pointEntry.points },
           { session }
         );
+        usedLoyaltyPoints.push({
+          loyalty_point_id: pointEntry._id,
+          original_points: pointEntry.points+pointsToUse,
+          points_used: pointsToUse,
+          fully_redeemed: false,
+          expiryDate: pointEntry.expiryDate,
+          earnedAt: pointEntry.earnedAt,
+        });
       }
     }
 
@@ -86,6 +104,7 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
       availablePoints: totalAvailablePoints,
       redeemedPoints: actualRedeemedPoints,
       message: `Successfully redeemed ${actualRedeemedPoints} points using FIFO`,
+      usedLoyaltyPoints: usedLoyaltyPoints,
     };
   } catch (error) {
     logger.error(`Error in FIFO point redemption: ${error.message}`, {
@@ -1013,6 +1032,7 @@ const redeemPoints = async (req, res) => {
           metadata: {
             total_spent,
             requested_by,
+            used_loyalty_points: fifoResult.usedLoyaltyPoints,
           },
           transaction_date: new Date(),
           app_type: appType._id,
@@ -1034,6 +1054,7 @@ const redeemPoints = async (req, res) => {
     return response_handler(res, 200, "Points redeemed successfully", {
       total_spent,
       point_balance: updatedCustomer.total_points,
+      used_loyalty_points: fifoResult.usedLoyaltyPoints,
     });
   } catch (error) {
     await transaction.abort();
@@ -1138,44 +1159,39 @@ const cancelRedemption = async (req, res) => {
     // Create loyalty points record with expiry date for restored points
     if (pointsToRestore > 0) {
       try {
-        // Get customer with tier information for expiry calculation
-        const customerWithTier = await Customer.findById(
-          originalTransaction.customer_id._id
-        )
-          .populate("tier")
-          .session(session);
+        // Get used loyalty points
+        const usedLoyaltyPoints = originalTransaction.metadata?.used_loyalty_points;
 
-        // Calculate expiry date based on customer's tier
-        const expiryDate = await PointsExpirationRules.calculateExpiryDate(
-          customerWithTier.tier._id
-        );
-
-        // Create loyalty points record for tracking expiration of restored points
-        await LoyaltyPoints.create(
-          [
-            {
-              customer_id: originalTransaction.customer_id._id,
-              points: pointsToRestore,
-              expiryDate: expiryDate,
-              transaction_id: (
-                await Transaction.findOne({
-                  transaction_id: `${transaction_id}_cancelled`,
-                  transaction_type: "adjust",
-                }).session(session)
-              )._id,
-              earnedAt: new Date(),
-              status: "active",
-            },
-          ],
-          { session }
-        );
+        // Loop and update old loyalty points
+        for (const usedLoyaltyPoint of usedLoyaltyPoints) {
+          const loyaltyPointId = usedLoyaltyPoint.loyalty_point_id.toString();
+          //if fully redeemed is true then
+          if(usedLoyaltyPoint.fully_redeemed){
+          await LoyaltyPoints.findByIdAndUpdate(
+            loyaltyPointId,
+              { points: usedLoyaltyPoint.points_used ,status: "active" },
+              { session }
+            );
+          }else{
+            //add points to old LoyaltyPoints (if not expired) and make active
+            const loyaltyPoint = await LoyaltyPoints.findById(loyaltyPointId,null, { session });
+            if(loyaltyPoint && loyaltyPoint.expiryDate > new Date()){
+              await LoyaltyPoints.findByIdAndUpdate(
+                loyaltyPointId,
+                { points: loyaltyPoint.points + usedLoyaltyPoint.points_used, status: "active" },
+                { session }
+              );
+            }
+          }
+        }
+       
 
         logger.info(
           `Loyalty points record created for cancelled redemption: ${customer_id}`,
           {
             customer_id,
             points: pointsToRestore,
-            expiryDate: expiryDate,
+            
             original_transaction_id: transaction_id,
           }
         );
@@ -1215,7 +1231,6 @@ const cancelRedemption = async (req, res) => {
     await transaction.end();
   }
 };
-
 const generateToken = async (req, res) => {
   try {
     const { customer_id, requested_by } = req.body;
