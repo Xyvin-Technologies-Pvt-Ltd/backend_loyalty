@@ -3,5 +3,5 @@
  * This file now serves as a simple entry point that delegates to src/server.js
  */
 
-// Start the server
+// Start the servers
 require('./src/server');
