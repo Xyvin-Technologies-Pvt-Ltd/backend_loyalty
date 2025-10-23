@@ -416,48 +416,109 @@ exports.updateCoupon = async (req, res) => {
       redemptionUrl,
       linkData,
       priority,
+      code, // Add code field for PRE_GENERATED coupons
     } = req.body;
 
-    //if priority present we should shift the existing coupon to the next priority
-    const coupon = await CouponCode.findById(couponId);
-    const oldPriority = coupon.priority;
-    const newPriority = priority;
-    if (newPriority < oldPriority) {
-      // Moving UP
-      console.log("Moving UP");
-      await CouponCode.updateMany(
-        { priority: { $gte: newPriority, $lt: oldPriority } },
-        { $inc: { priority: 1 } }
-      );
-    } else if (newPriority > oldPriority) {
-      // Moving DOWN
-      console.log("Moving DOWN");
-      await CouponCode.updateMany(
-        { priority: { $gt: oldPriority, $lte: newPriority } },
-        { $inc: { priority: -1 } }
-      );
+    // Get the existing coupon to check type and handle priority
+    const existingCoupon = await CouponCode.findById(couponId);
+    if (!existingCoupon) {
+      return response_handler(res, 404, false, "Coupon not found");
     }
 
-    const updatedCoupon = await CouponCode.findByIdAndUpdate(couponId, {
-      $set: {
-        title,
-        description,
-        posterImage,
-        merchantId,
-        couponCategoryId,
-        validityPeriod,
-        discountDetails,
-        redeemablePointsCount,
-        eligibilityCriteria,
-        usagePolicy,
-        conditions,
-        termsAndConditions,
-        redemptionInstructions,
-        redemptionUrl,
-        linkData,
-        priority,
-      },
-    });
+    // Handle priority changes
+    if (priority !== undefined && existingCoupon.priority !== priority) {
+      const oldPriority = existingCoupon.priority;
+      const newPriority = priority;
+
+      if (newPriority < oldPriority) {
+        // Moving UP
+        console.log("Moving UP");
+        await CouponCode.updateMany(
+          { priority: { $gte: newPriority, $lt: oldPriority } },
+          { $inc: { priority: 1 } }
+        );
+      } else if (newPriority > oldPriority) {
+        // Moving DOWN
+        console.log("Moving DOWN");
+        await CouponCode.updateMany(
+          { priority: { $gt: oldPriority, $lte: newPriority } },
+          { $inc: { priority: -1 } }
+        );
+      }
+    }
+
+    // Prepare update object
+    const updateData = {
+      title,
+      description,
+      posterImage,
+      merchantId,
+      couponCategoryId,
+      validityPeriod,
+      discountDetails,
+      redeemablePointsCount,
+      eligibilityCriteria,
+      usagePolicy,
+      conditions,
+      termsAndConditions,
+      redemptionInstructions,
+      redemptionUrl,
+      linkData,
+      priority,
+    };
+
+    // Handle code updates for PRE_GENERATED coupons
+    if (existingCoupon.type === "PRE_GENERATED" && code) {
+      // If code is provided, we need to handle it carefully
+      if (Array.isArray(code)) {
+        // If it's an array of new codes, we need to preserve existing redemption status
+        const existingCodes = existingCoupon.code || [];
+        const existingCodeMap = new Map();
+
+        // Create a map of existing codes and their redemption status
+        existingCodes.forEach((existingCode) => {
+          existingCodeMap.set(existingCode.pin, existingCode.isRedeemed);
+        });
+
+        // Process new codes and preserve redemption status where possible
+        const processedCodes = code.map((newCode) => {
+          if (typeof newCode === "string") {
+            // If it's just a string (pin), check if it exists and preserve redemption status
+            return {
+              pin: newCode,
+              isRedeemed: existingCodeMap.get(newCode) || false,
+            };
+          } else if (typeof newCode === "object" && newCode.pin) {
+            // If it's an object with pin, preserve redemption status if it exists
+            return {
+              pin: newCode.pin,
+              isRedeemed:
+                existingCodeMap.get(newCode.pin) || newCode.isRedeemed || false,
+            };
+          }
+          return newCode;
+        });
+
+        updateData.code = processedCodes;
+      } else if (typeof code === "string") {
+        // If it's a single string code, check if it exists and preserve redemption status
+        const existingCodes = existingCoupon.code || [];
+        const existingCode = existingCodes.find((c) => c.pin === code);
+
+        updateData.code = [
+          {
+            pin: code,
+            isRedeemed: existingCode ? existingCode.isRedeemed : false,
+          },
+        ];
+      }
+    }
+
+    const updatedCoupon = await CouponCode.findByIdAndUpdate(
+      couponId,
+      { $set: updateData },
+      { new: true }
+    );
 
     return response_handler(
       res,

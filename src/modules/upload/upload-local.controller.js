@@ -6,7 +6,7 @@ const fs = require("fs");
 function getUploadPath() {
   // Check if running in Docker container
   const isDocker =
-    fs.existsSync("/.dockerenv") || process.env.DOCKER_ENV === "true";
+    fs.existsSync("/.dockerenv") || process.env.NODE_ENV !== "development";
 
   if (isDocker) {
     // Docker container path (will be mounted as volume in production)
@@ -180,7 +180,7 @@ const uploadController = {
     try {
       const uploadPath = getUploadPath();
       const isDocker =
-        fs.existsSync("/.dockerenv") || process.env.DOCKER_ENV === "true";
+        fs.existsSync("/.dockerenv") || process.env.NODE_ENV !== "development";
       const exists = fs.existsSync(uploadPath);
 
       let fileCount = 0;
@@ -255,7 +255,7 @@ function handleSuccessfulUpload(req, res, fieldUsed) {
   // File uploaded successfully
   //find server adddress and add server address to the url
   const serverAddress = req.protocol + "://" + req.get("host");
-  const fileUrl = serverAddress + `/uploads/${req.file.filename}`;
+  const fileUrl = "https://khedmahloyalty.oifcoman.com:3737" + `/uploads/${req.file.filename}`;
   console.log(fileUrl);
 
   res.status(200).json({
