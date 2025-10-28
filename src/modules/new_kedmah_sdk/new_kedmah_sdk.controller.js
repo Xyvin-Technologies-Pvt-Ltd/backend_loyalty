@@ -1490,10 +1490,11 @@ const getMerchantOffers = async (req, res) => {
       });
     }
     const total = sortedCoupons.length;
-    const paginatedCoupons = sortedCoupons.slice(
-      (page - 1) * limit,
-      page * limit
-    );
+    // const paginatedCoupons = sortedCoupons.slice(
+    //   (page - 1) * limit,
+    //   page * limit
+    // );
+     const paginatedCoupons = sortedCoupons;
 
     return response_handler(
       res,
@@ -1523,7 +1524,7 @@ const getCouponBrands = async (req, res) => {
 
     const couponBrands = await CouponBrand.find(filter)
       .skip(skipCount)
-      .limit(limit)
+      // .limit(limit)
       .sort({ priority: -1 })
       .lean();
 
@@ -1565,7 +1566,7 @@ const getAllCategories = async (req, res) => {
 
     const couponCategories = await CouponCategory.find(filter)
       .skip(skipCount)
-      .limit(limit)
+      // .limit(limit)
       .sort({ priority: -1 })
       .lean();
 
