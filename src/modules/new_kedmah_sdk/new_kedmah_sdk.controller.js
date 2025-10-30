@@ -90,7 +90,7 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
         );
         usedLoyaltyPoints.push({
           loyalty_point_id: pointEntry._id,
-          original_points: pointEntry.points+pointsToUse,
+          original_points: pointEntry.points + pointsToUse,
           points_used: pointsToUse,
           fully_redeemed: false,
           expiryDate: pointEntry.expiryDate,
@@ -1161,38 +1161,45 @@ const cancelRedemption = async (req, res) => {
     if (pointsToRestore > 0) {
       try {
         // Get used loyalty points
-        const usedLoyaltyPoints = originalTransaction.metadata?.used_loyalty_points;
+        const usedLoyaltyPoints =
+          originalTransaction.metadata?.used_loyalty_points;
 
         // Loop and update old loyalty points
         for (const usedLoyaltyPoint of usedLoyaltyPoints) {
           const loyaltyPointId = usedLoyaltyPoint.loyalty_point_id.toString();
           //if fully redeemed is true then
-          if(usedLoyaltyPoint.fully_redeemed){
-          await LoyaltyPoints.findByIdAndUpdate(
-            loyaltyPointId,
-              { points: usedLoyaltyPoint.points_used ,status: "active" },
+          if (usedLoyaltyPoint.fully_redeemed) {
+            await LoyaltyPoints.findByIdAndUpdate(
+              loyaltyPointId,
+              { points: usedLoyaltyPoint.points_used, status: "active" },
               { session }
             );
-          }else{
+          } else {
             //add points to old LoyaltyPoints (if not expired) and make active
-            const loyaltyPoint = await LoyaltyPoints.findById(loyaltyPointId,null, { session });
-            if(loyaltyPoint && loyaltyPoint.expiryDate > new Date()){
+            const loyaltyPoint = await LoyaltyPoints.findById(
+              loyaltyPointId,
+              null,
+              { session }
+            );
+            if (loyaltyPoint && loyaltyPoint.expiryDate > new Date()) {
               await LoyaltyPoints.findByIdAndUpdate(
                 loyaltyPointId,
-                { points: loyaltyPoint.points + usedLoyaltyPoint.points_used, status: "active" },
+                {
+                  points: loyaltyPoint.points + usedLoyaltyPoint.points_used,
+                  status: "active",
+                },
                 { session }
               );
             }
           }
         }
-       
 
         logger.info(
           `Loyalty points record created for cancelled redemption: ${customer_id}`,
           {
             customer_id,
             points: pointsToRestore,
-            
+
             original_transaction_id: transaction_id,
           }
         );
@@ -1397,109 +1404,136 @@ const getMerchantOffers = async (req, res) => {
       search = "",
     } = req.query;
 
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build base filter
     const filter = {};
     if (type) filter.type = type;
     if (categoryId) filter.couponCategoryId = categoryId;
+
+    // Handle search with referenced collections
     if (search && search.trim()) {
       const searchRegex = { $regex: search.trim(), $options: "i" };
-      filter.$or = [
+      const orConditions = [
         { "title.en": searchRegex },
         { "title.ar": searchRegex },
         { "description.en": searchRegex },
         { "description.ar": searchRegex },
       ];
 
-      // We need to handle merchant name and category name search differently
-      // since they are in referenced collections
-      const merchantFilter = {
-        $or: [{ "title.en": searchRegex }, { "title.ar": searchRegex }],
-      };
-      const categoryFilter = {
-        $or: [{ "title.en": searchRegex }, { "title.ar": searchRegex }],
-      };
-
-      // We'll use aggregation to find matching merchants and categories
-      const merchantPromise = mongoose
-        .model("CouponBrand")
-        .find(merchantFilter)
-        .select("_id");
-      const categoryPromise = mongoose
-        .model("CouponCategory")
-        .find(categoryFilter)
-        .select("_id");
-
-      // Wait for both queries to complete
+      // Find matching merchants and categories
       const [matchingMerchants, matchingCategories] = await Promise.all([
-        merchantPromise,
-        categoryPromise,
+        mongoose.model("CouponBrand").find({
+          $or: [{ "title.en": searchRegex }, { "title.ar": searchRegex }],
+        }).select("_id").lean(),
+        mongoose.model("CouponCategory").find({
+          $or: [{ "title.en": searchRegex }, { "title.ar": searchRegex }],
+        }).select("_id").lean(),
       ]);
 
-      // If we found matching merchants or categories, add them to the filter
       if (matchingMerchants.length > 0) {
-        const merchantIds = matchingMerchants.map((m) => m._id);
-        if (!filter.$or) filter.$or = [];
-        filter.$or.push({ merchantId: { $in: merchantIds } });
+        orConditions.push({ 
+          merchantId: { $in: matchingMerchants.map(m => m._id) } 
+        });
       }
 
       if (matchingCategories.length > 0) {
-        const categoryIds = matchingCategories.map((c) => c._id);
-        if (!filter.$or) filter.$or = [];
-        filter.$or.push({ couponCategoryId: { $in: categoryIds } });
+        orConditions.push({ 
+          couponCategoryId: { $in: matchingCategories.map(c => c._id) } 
+        });
       }
+
+      filter.$or = orConditions;
     }
 
-    let allCoupons = await CouponCode.find(filter)
-      .populate("merchantId")
-      .populate("couponCategoryId")
-      .sort({ priority: 1 });
+    // Build aggregation pipeline for better performance
+    const pipeline = [
+      { $match: filter },
+      { $sort: { priority: 1 } },
+    ];
 
-    //add a field such as eligible for user tier true or false based on coupon tier eligibilty
-    const customer = await Customer.findOne({ customer_id: customer_id });
-    if (customer) {
-      allCoupons.forEach((coupon) => {
-        if (coupon.eligibilityCriteria.tiers.includes(customer.tier)) {
-          coupon.eligible_for_tier = true;
-        } else {
-          coupon.eligible_for_tier = false;
+    // Add brand-based sorting if brandId is provided
+    if (brandId) {
+      pipeline.push({
+        $addFields: {
+          isBrand: {
+            $cond: [
+              { $eq: ["$merchantId", mongoose.Types.ObjectId(brandId)] },
+              0,
+              1
+            ]
+          }
         }
       });
+      pipeline.push({ $sort: { isBrand: 1, priority: 1 } });
+    }
+
+    // Get total count before pagination
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const countResult = await CouponCode.aggregate(countPipeline);
+    const total = countResult.length > 0 ? countResult[0].total : 0;
+
+    // Add pagination
+    pipeline.push({ $skip: skip });
+    pipeline.push({ $limit: limitNum });
+
+    // Add lookups for populated fields
+    pipeline.push(
+      {
+        $lookup: {
+          from: "couponbrands",
+          localField: "merchantId",
+          foreignField: "_id",
+          as: "merchantId"
+        }
+      },
+      { $unwind: { path: "$merchantId", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "couponcategories",
+          localField: "couponCategoryId",
+          foreignField: "_id",
+          as: "couponCategoryId"
+        }
+      },
+      { $unwind: { path: "$couponCategoryId", preserveNullAndEmptyArrays: true } }
+    );
+
+    // Execute aggregation
+    let coupons = await CouponCode.aggregate(pipeline);
+
+    // Add tier eligibility if customer_id is provided
+    if (customer_id) {
+      const customer = await Customer.findOne({ customer_id }).select("tier").lean();
+      
+      if (customer) {
+        coupons = coupons.map(coupon => ({
+          ...coupon,
+          eligible_for_tier: coupon.eligibilityCriteria?.tiers?.includes(customer.tier) || false
+        }));
+      }
     }
 
     // Replace URLs
-    allCoupons.forEach((coupon) => {
+    const baseUrl = "http://api-uat-loyalty.xyvin.com/";
+    const newUrl = "http://141.105.172.45:7733/api/";
+
+    coupons.forEach(coupon => {
       if (coupon.posterImage) {
-        coupon.posterImage = coupon.posterImage.replace(
-          "http://api-uat-loyalty.xyvin.com/",
-          "http://141.105.172.45:7733/api/"
-        );
+        coupon.posterImage = coupon.posterImage.replace(baseUrl, newUrl);
       }
       if (coupon.merchantId?.image) {
-        coupon.merchantId.image = coupon.merchantId.image.replace(
-          "http://api-uat-loyalty.xyvin.com/",
-          "http://141.105.172.45:7733/api/"
-        );
+        coupon.merchantId.image = coupon.merchantId.image.replace(baseUrl, newUrl);
       }
     });
-
-    let sortedCoupons = allCoupons;
-    if (brandId) {
-      sortedCoupons = allCoupons.sort((a, b) => {
-        const aIsBrand = a.merchantId?._id?.toString() === brandId;
-        const bIsBrand = b.merchantId?._id?.toString() === brandId;
-        return bIsBrand - aIsBrand;
-      });
-    }
-    const total = sortedCoupons.length;
-    const paginatedCoupons = sortedCoupons.slice(
-      (page - 1) * limit,
-      page * limit
-    );
 
     return response_handler(
       res,
       200,
       "All coupons retrieved successfully",
-      paginatedCoupons,
+      coupons,
       total
     );
   } catch (error) {
