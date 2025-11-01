@@ -46,7 +46,8 @@ const kedmah_offers_routes = require("../modules/kedmah_offers/kedmah_offers.rou
 const payment_method_routes = require("../modules/payment_method/payment_method.router");
 //upload routes
 const upload_routes = require("../modules/upload/upload.routes");
-const dashboard_routes = require("../modules/dashboard/dashboard.routes")
+const dashboard_routes = require("../modules/dashboard/dashboard.routes");
+const reports_routes = require("../modules/reports/reports.routes");
 
 
 //new-kedmah-sdk-route 
@@ -127,6 +128,7 @@ function registerRoutes(app, basePath) {
   app.use(`${basePath}/transactions`, transaction_routes);
   app.use(`${basePath}/customer-support`, customer_support_routes);
   app.use(`${basePath}/dashboard`, dashboard_routes);
+  app.use(`${basePath}/reports`, reports_routes);
 
   // Theme settings routes
   app.use(`${basePath}/theme-settings`, themeSettingsRoutes);
