@@ -8,7 +8,6 @@ const {
 const { generate_admin_token } = require("../../utils/generate_admin_token");
 const validator = require("./auth.validator");
 
-
 //for admin only
 exports.signup = async (req, res) => {
   try {
@@ -52,6 +51,15 @@ exports.admin_login = async (req, res) => {
       return response_handler(res, 400, "User not found.");
     }
 
+    // Check if account is active
+    if (!user.isActive) {
+      return response_handler(
+        res,
+        403,
+        "Account is inactive. Please contact administrator."
+      );
+    }
+
     const is_password_valid = await compare_passwords(
       req.body.password,
       user.password
@@ -60,9 +68,21 @@ exports.admin_login = async (req, res) => {
       return response_handler(res, 400, "Invalid password.");
     }
 
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+
     const jwt_token = await generate_admin_token(user._id);
 
-    return response_handler(res, 200, "Login successful!", jwt_token);
+    // Check if password change is required
+    const requirePasswordChange =
+      user.isFirstLogin || user.requirePasswordChange;
+
+    return response_handler(res, 200, "Login successful!", {
+      token: jwt_token,
+      requirePasswordChange,
+      isFirstLogin: user.isFirstLogin,
+    });
   } catch (error) {
     return response_handler(
       res,
@@ -74,8 +94,16 @@ exports.admin_login = async (req, res) => {
 
 exports.getMe = async (req, res) => {
   try {
-    const user = await Admin.findById(req.admin._id, 'name email _id status role').populate('role');
-    return response_handler(res, 200, "User details retrieved successfully", user);
+    const user = await Admin.findById(
+      req.admin._id,
+      "name email _id status role"
+    ).populate("role");
+    return response_handler(
+      res,
+      200,
+      "User details retrieved successfully",
+      user
+    );
   } catch (error) {
     return response_handler(
       res,
@@ -85,13 +113,83 @@ exports.getMe = async (req, res) => {
   }
 };
 
-
 exports.logout = async (req, res) => {
   try {
     res.clearCookie("token");
     return response_handler(res, 200, "Logout successful!");
   } catch (error) {
-    return response_handler(res, 500, `Internal Server Error. ${error.message}`);
+    return response_handler(
+      res,
+      500,
+      `Internal Server Error. ${error.message}`
+    );
+  }
+};
+
+// Force password change (for first-time login)
+exports.forcePasswordChange = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return response_handler(
+        res,
+        400,
+        "Current password and new password are required."
+      );
+    }
+
+    if (newPassword.length < 8) {
+      return response_handler(
+        res,
+        400,
+        "New password must be at least 8 characters long."
+      );
+    }
+
+    const admin = await Admin.findById(req.admin._id);
+    if (!admin) {
+      return response_handler(res, 404, "Admin not found.");
+    }
+
+    // Verify current password
+    const isPasswordValid = await compare_passwords(
+      currentPassword,
+      admin.password
+    );
+    if (!isPasswordValid) {
+      return response_handler(res, 400, "Current password is incorrect.");
+    }
+
+    // Check if new password is same as current
+    const isSamePassword = await compare_passwords(newPassword, admin.password);
+    if (isSamePassword) {
+      return response_handler(
+        res,
+        400,
+        "New password must be different from current password."
+      );
+    }
+
+    // Update password and flags
+    admin.password = newPassword;
+    admin.isFirstLogin = false;
+    admin.requirePasswordChange = false;
+    admin.passwordChangedAt = new Date();
+    await admin.save();
+
+    await admin.logActivity(
+      "PASSWORD_CHANGE",
+      "Password changed after first login"
+    );
+
+    return response_handler(res, 200, "Password changed successfully!");
+  } catch (error) {
+    return response_handler(
+      res,
+      500,
+      `Internal Server Error. ${error.message}`
+    );
   }
 };
 

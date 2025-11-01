@@ -1,88 +1,79 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { authorizePermission } = require('../../middlewares/auth/auth');
-const { createAuditMiddleware } = require('../audit');
-const validators = require('./sub_admin.validators');
+const { authorizePermission } = require("../../middlewares/auth/auth");
+const { protect } = require("../../middlewares/auth/protect");
+const { createAuditMiddleware } = require("../audit");
+const validators = require("./sub_admin.validators");
 const {
-    createSubAdmin,
-    getAllSubAdmins,
-    getSubAdminById,
-    updateSubAdmin,
-    deleteSubAdmin,
-    resetPassword
-} = require('./sub_admin.controller');
+  createSubAdmin,
+  getAllSubAdmins,
+  getSubAdminById,
+  updateSubAdmin,
+  deleteSubAdmin,
+  resetPassword,
+  createPasswordChangeRequest,
+  getAllPasswordChangeRequests,
+  getMyPasswordChangeRequests,
+  approvePasswordChangeRequest,
+  rejectPasswordChangeRequest,
+} = require("./sub_admin.controller");
 
 // Create audit middleware for the sub_admin module
-const subAdminAudit = createAuditMiddleware('sub_admin');
+const subAdminAudit = createAuditMiddleware("sub_admin");
 
 // Create new sub-admin
-router.post('/',
-    authorizePermission('MANAGE_SUB_ADMINS'),
-    subAdminAudit.captureResponse(),
-    subAdminAudit.adminAction('create_sub_admin', {
-        description: 'Admin created a new sub-admin',
-        targetModel: 'SubAdmin',
-        details: req => req.body
-    }),
-    createSubAdmin
-);
+router.post("/", authorizePermission("MANAGE_SUB_ADMINS"), createSubAdmin);
 
 // Get all sub-admins
-router.get('/',
-    authorizePermission('VIEW_SUB_ADMINS'),
-    subAdminAudit.adminAction('list_sub_admins', {
-        description: 'User viewed all sub-admins',
-        targetModel: 'SubAdmin'
-    }),
-    getAllSubAdmins
+router.get("/", authorizePermission("VIEW_SUB_ADMINS"), getAllSubAdmins);
+
+// Password Change Request Routes (MUST come before /:id routes to avoid conflicts)
+
+// Create password change request (Any authenticated user can request)
+router.post("/password-change-request", protect, createPasswordChangeRequest);
+
+// Get all password change requests (Super Admin only)
+router.get(
+  "/password-change-requests",
+  authorizePermission("MANAGE_SUB_ADMINS"),
+  getAllPasswordChangeRequests
 );
 
-// Get sub-admin by ID
-router.get('/:id',
-    authorizePermission('VIEW_SUB_ADMINS'),
-    subAdminAudit.adminAction('view_sub_admin', {
-        description: 'User viewed a sub-admin',
-        targetModel: 'SubAdmin',
-        targetId: req => req.params.id
-    }),
-    getSubAdminById
+// Get user's own password change requests
+router.get(
+  "/my-password-change-requests",
+  protect,
+  getMyPasswordChangeRequests
 );
 
-// Update sub-admin
-router.put('/:id',
-    authorizePermission('MANAGE_SUB_ADMINS'),
-    subAdminAudit.captureResponse(),
-    subAdminAudit.adminAction('update_sub_admin', {
-        description: 'Admin updated a sub-admin',
-        targetModel: 'SubAdmin',
-        targetId: req => req.params.id,
-        details: req => req.body
-    }),
-    updateSubAdmin
+// Approve password change request (Super Admin only)
+router.post(
+  "/password-change-request/:requestId/approve",
+  authorizePermission("MANAGE_SUB_ADMINS"),
+  approvePasswordChangeRequest
 );
 
-// Delete sub-admin
-router.delete('/:id',
-    authorizePermission('MANAGE_SUB_ADMINS'),
-    subAdminAudit.captureResponse(),
-    subAdminAudit.adminAction('delete_sub_admin', {
-        description: 'Admin deleted a sub-admin',
-        targetModel: 'SubAdmin',
-        targetId: req => req.params.id
-    }),
-    deleteSubAdmin
+// Reject password change request (Super Admin only)
+router.post(
+  "/password-change-request/:requestId/reject",
+  authorizePermission("MANAGE_SUB_ADMINS"),
+  rejectPasswordChangeRequest
 );
 
 // Reset password
-router.post('/reset-password',
-    authorizePermission('MANAGE_SUB_ADMINS'),
-    subAdminAudit.captureResponse(),
-    subAdminAudit.adminAction('reset_sub_admin_password', {
-        description: 'Admin reset sub-admin password',
-        targetModel: 'SubAdmin',
-        details: req => req.body
-    }),
-    resetPassword
+router.post(
+  "/reset-password",
+  authorizePermission("MANAGE_SUB_ADMINS"),
+  resetPassword
 );
 
-module.exports = router; 
+// Get sub-admin by ID (MUST come after specific routes)
+router.get("/:id", authorizePermission("VIEW_SUB_ADMINS"), getSubAdminById);
+
+// Update sub-admin
+router.put("/:id", authorizePermission("MANAGE_SUB_ADMINS"), updateSubAdmin);
+
+// Delete sub-admin
+router.delete("/:id", authorizePermission("MANAGE_SUB_ADMINS"), deleteSubAdmin);
+
+module.exports = router;
