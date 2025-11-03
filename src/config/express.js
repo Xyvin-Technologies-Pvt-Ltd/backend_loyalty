@@ -14,7 +14,6 @@ const { xss } = require("express-xss-sanitizer");
 const compression = require("compression");
 const { env } = require("./env");
 
-
 // Get the appropriate upload path based on environment
 function getUploadPath() {
   // Check if running in Docker container
@@ -29,7 +28,6 @@ function getUploadPath() {
     return path.join(process.cwd(), "uploads");
   }
 }
-
 
 function initializeExpress() {
   // Create Express application
@@ -54,6 +52,7 @@ function initializeExpress() {
         "http://localhost:5173",
         "http://141.105.172.45:7733",
         "http://api-uat-loyalty.xyvin.com",
+        "http://43.205.198.64",
       ],
       credentials: true, // if you need to allow cookies or auth headers
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -62,7 +61,7 @@ function initializeExpress() {
         "Authorization",
         "X-Requested-With",
         "api-key",
-        "x-api-key"
+        "x-api-key",
       ],
       optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
     })
@@ -109,11 +108,6 @@ function initializeExpress() {
       lastModified: true,
     })
   );
-
-
-
-
- 
 
   // Apply request logging middleware
   app.use(request_logger);
