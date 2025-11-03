@@ -54,7 +54,9 @@ const generatePointsReport = async (req, res) => {
     // Count users with multiple app types (Both)
     const bothUsersCount = await Customer.countDocuments({
       ...customerFilter,
-      $expr: { $gt: [{ $size: "$app_type" }, 1] },
+      $expr: {
+        $and: [{ $isArray: "$app_type" }, { $gt: [{ $size: "$app_type" }, 1] }],
+      },
     });
     registeredUsers["both"] = bothUsersCount;
 
@@ -106,14 +108,29 @@ const generatePointsReport = async (req, res) => {
       {
         $group: {
           _id: "$customer_id",
-          apps: { $addToSet: "$metadata.requested_by" },
+          apps: {
+            $addToSet: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $ne: ["$metadata.requested_by", null] },
+                    { $ne: ["$metadata.requested_by", ""] },
+                  ],
+                },
+                then: "$metadata.requested_by",
+                else: "$$REMOVE",
+              },
+            },
+          },
           transactionCount: { $sum: 1 },
           totalPoints: { $sum: "$points" },
         },
       },
       {
         $match: {
-          $expr: { $gt: [{ $size: "$apps" }, 1] }, // More than 1 app
+          $expr: {
+            $and: [{ $isArray: "$apps" }, { $gt: [{ $size: "$apps" }, 1] }],
+          },
         },
       },
     ]);
@@ -183,14 +200,24 @@ const generatePointsReport = async (req, res) => {
       {
         $group: {
           _id: "$customer_id",
-          apps: { $addToSet: "$app_type" },
+          apps: {
+            $addToSet: {
+              $cond: {
+                if: { $ne: ["$app_type", null] },
+                then: "$app_type",
+                else: "$$REMOVE",
+              },
+            },
+          },
           transactionCount: { $sum: 1 },
           totalPoints: { $sum: { $abs: "$points" } },
         },
       },
       {
         $match: {
-          $expr: { $gt: [{ $size: "$apps" }, 1] }, // More than 1 app
+          $expr: {
+            $and: [{ $isArray: "$apps" }, { $gt: [{ $size: "$apps" }, 1] }],
+          },
         },
       },
     ]);
@@ -269,14 +296,14 @@ const generatePointsReport = async (req, res) => {
 
     // Opening balance for "Both" customers
     // Get all customers who have used both apps (from all time, not just date range)
-    const bothCustomersAllTime = await Transaction.aggregate([
+    // We need to find customers who have transactions in multiple apps
+    // Step 1: Get customers who earned in multiple apps (using requested_by)
+    const bothCustomersEarnAllTime = await Transaction.aggregate([
       {
         $match: {
+          transaction_type: "earn",
           status: "completed",
-          $or: [
-            { "metadata.requested_by": { $exists: true, $ne: null } },
-            { app_type: { $ne: null } },
-          ],
+          "metadata.requested_by": { $exists: true, $ne: null },
         },
       },
       {
@@ -284,14 +311,25 @@ const generatePointsReport = async (req, res) => {
           _id: "$customer_id",
           apps: {
             $addToSet: {
-              $ifNull: ["$metadata.requested_by", "$app_type"],
+              $cond: {
+                if: {
+                  $and: [
+                    { $ne: ["$metadata.requested_by", null] },
+                    { $ne: ["$metadata.requested_by", ""] },
+                  ],
+                },
+                then: "$metadata.requested_by",
+                else: "$$REMOVE",
+              },
             },
           },
         },
       },
       {
         $match: {
-          $expr: { $gt: [{ $size: "$apps" }, 1] },
+          $expr: {
+            $and: [{ $isArray: "$apps" }, { $gt: [{ $size: "$apps" }, 1] }],
+          },
         },
       },
       {
@@ -301,26 +339,80 @@ const generatePointsReport = async (req, res) => {
       },
     ]);
 
-    const bothCustomerIds = bothCustomersAllTime.map((c) => c._id);
-
-    const bothOpeningBalance = await Transaction.aggregate([
+    // Step 2: Get customers who redeemed in multiple apps (using app_type)
+    const bothCustomersRedeemAllTime = await Transaction.aggregate([
       {
         $match: {
-          customer_id: { $in: bothCustomerIds },
+          transaction_type: "redeem",
           status: "completed",
-          transaction_date: { $lt: dateStart },
+          app_type: { $ne: null },
         },
       },
       {
         $group: {
-          _id: null,
-          totalPoints: { $sum: "$points" },
+          _id: "$customer_id",
+          apps: {
+            $addToSet: {
+              $cond: {
+                if: { $ne: ["$app_type", null] },
+                then: "$app_type",
+                else: "$$REMOVE",
+              },
+            },
+          },
+        },
+      },
+      {
+        $match: {
+          $expr: {
+            $and: [{ $isArray: "$apps" }, { $gt: [{ $size: "$apps" }, 1] }],
+          },
+        },
+      },
+      {
+        $project: {
+          customer_id: "$_id",
         },
       },
     ]);
 
+    // Combine all "both" customer IDs from both earn and redeem
+    const earnBothIds = bothCustomersEarnAllTime.map((c) => c.customer_id);
+    const redeemBothIds = bothCustomersRedeemAllTime.map((c) => c.customer_id);
+
+    // Create a Set to remove duplicates (comparing ObjectIds)
+    const bothCustomerIdsSet = new Set();
+    earnBothIds.forEach((id) => bothCustomerIdsSet.add(id.toString()));
+    redeemBothIds.forEach((id) => bothCustomerIdsSet.add(id.toString()));
+
+    const bothCustomerIds = Array.from(bothCustomerIdsSet).map(
+      (id) => new mongoose.Types.ObjectId(id)
+    );
+
+    // Only query if we have both customers
+    let bothOpeningBalanceResult = [];
+    if (bothCustomerIds.length > 0) {
+      bothOpeningBalanceResult = await Transaction.aggregate([
+        {
+          $match: {
+            customer_id: { $in: bothCustomerIds },
+            status: "completed",
+            transaction_date: { $lt: dateStart },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalPoints: { $sum: "$points" },
+          },
+        },
+      ]);
+    }
+
     openingBalance["both"] =
-      bothOpeningBalance.length > 0 ? bothOpeningBalance[0].totalPoints : 0;
+      bothOpeningBalanceResult.length > 0
+        ? bothOpeningBalanceResult[0].totalPoints
+        : 0;
 
     // ===== 5. CLOSING BALANCE (up to end date) =====
     // For closing balance, we need to handle both earn (metadata.requested_by) and redeem (app_type)
@@ -378,24 +470,29 @@ const generatePointsReport = async (req, res) => {
     }
 
     // Closing balance for "Both" customers
-    const bothClosingBalance = await Transaction.aggregate([
-      {
-        $match: {
-          customer_id: { $in: bothCustomerIds },
-          status: "completed",
-          transaction_date: { $lte: dateEnd },
+    let bothClosingBalanceResult = [];
+    if (bothCustomerIds.length > 0) {
+      bothClosingBalanceResult = await Transaction.aggregate([
+        {
+          $match: {
+            customer_id: { $in: bothCustomerIds },
+            status: "completed",
+            transaction_date: { $lte: dateEnd },
+          },
         },
-      },
-      {
-        $group: {
-          _id: null,
-          totalPoints: { $sum: "$points" },
+        {
+          $group: {
+            _id: null,
+            totalPoints: { $sum: "$points" },
+          },
         },
-      },
-    ]);
+      ]);
+    }
 
     closingBalance["both"] =
-      bothClosingBalance.length > 0 ? bothClosingBalance[0].totalPoints : 0;
+      bothClosingBalanceResult.length > 0
+        ? bothClosingBalanceResult[0].totalPoints
+        : 0;
 
     // ===== 6. CREATE EXCEL WORKBOOK =====
     const workbook = new ExcelJS.Workbook();

@@ -16,7 +16,6 @@ const protect = async (req, res, next) => {
       if (!jwtToken) {
         return response_handler(res, 401, "No token provided.");
       }
-
       //? Verify JWT token
       const decoded = jwt.verify(jwtToken, process.env.JWT_SECRET);
       req.admin_id = decoded.admin_id;
