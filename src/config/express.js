@@ -52,7 +52,7 @@ function initializeExpress() {
         "http://localhost:5173",
         "http://141.105.172.45:7733",
         "http://api-uat-loyalty.xyvin.com",
-        "https://loyalty-app-new.vercel.app",
+        "http://43.205.198.64",
       ],
       credentials: true, // if you need to allow cookies or auth headers
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
