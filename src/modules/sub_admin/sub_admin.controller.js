@@ -1,11 +1,20 @@
 const SubAdmin = require("../../models/admin_model");
 const Role = require("../../models/role_model");
 const response_handler = require("../../helpers/response_handler");
-const jwt = require("jsonwebtoken");
+const validators = require("./sub_admin.validators");
 
 // Create new sub-admin
 const createSubAdmin = async (req, res) => {
   try {
+    const { error } = validators.createSubAdmin.validate(req.body, {
+      abortEarly: false,
+    });
+
+    if (error) {
+      const error_messages = error.details.map((err) => err.message).join(", ");
+      return response_handler(res, 400, `Invalid input: ${error_messages}`);
+    }
+
     const { name, email, phoneNumber, password, roleId } = req.body;
 
     // Check if role exists
@@ -26,6 +35,7 @@ const createSubAdmin = async (req, res) => {
       phoneNumber,
       password,
       role: roleId,
+      isFirstLogin: true,
     });
 
     await subAdmin.save();
@@ -136,33 +146,31 @@ const deleteSubAdmin = async (req, res) => {
   }
 };
 
-// Reset password
+// Admin reset password
 const resetPassword = async (req, res) => {
   try {
-    const { email } = req.body;
-    const subAdmin = await SubAdmin.findOne({ email });
+    const { error } = validators.resetPassword.validate(req.body, {
+      abortEarly: false,
+    });
+
+    if (error) {
+      const error_messages = error.details.map((err) => err.message).join(", ");
+      return response_handler(res, 400, `Invalid input: ${error_messages}`);
+    }
+
+    const subAdmin = await SubAdmin.findById(req.params.id);
 
     if (!subAdmin) {
       return response_handler(res, 404, "Sub-admin not found");
     }
 
-    // Generate reset token
-    const resetToken = jwt.sign({ id: subAdmin._id }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
-    subAdmin.passwordResetToken = resetToken;
-    subAdmin.passwordResetExpires = Date.now() + 3600000; // 1 hour
-
+    subAdmin.password = req.body.newPassword;
+    subAdmin.isFirstLogin = true;
+    subAdmin.passwordChangedAt = new Date();
     await subAdmin.save();
-    await subAdmin.logActivity("PASSWORD_RESET", "Password reset requested");
+    await subAdmin.logActivity("PASSWORD_RESET", "Password reset by admin");
 
-    // TODO: Send reset email
-
-    return response_handler(
-      res,
-      200,
-      "Password reset instructions sent to email"
-    );
+    return response_handler(res, 200, "Password reset successfully");
   } catch (error) {
     console.error("Error resetting password:", error);
     return response_handler(res, 500, "Error resetting password");

@@ -74,13 +74,13 @@ router.delete('/:id',
 );
 
 // Reset password
-router.post('/reset-password',
+router.put('/:id/reset-password',
     authorizePermission('MANAGE_SUB_ADMINS'),
     subAdminAudit.captureResponse(),
     subAdminAudit.adminAction('reset_sub_admin_password', {
         description: 'Admin reset sub-admin password',
         targetModel: 'SubAdmin',
-        details: req => req.body
+        targetId: req => req.params.id
     }),
     resetPassword
 );

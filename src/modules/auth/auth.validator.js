@@ -13,6 +13,11 @@ exports.login = Joi.object({
   password: Joi.string().required(),
 });
 
+exports.changePassword = Joi.object({
+  oldPassword: Joi.string().min(6).required(),
+  newPassword: Joi.string().min(6).required(),
+});
+
 exports.register = Joi.object({
   customer_id: Joi.string().required(),
   name: Joi.string().required(),

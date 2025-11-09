@@ -142,7 +142,7 @@ const getAllCustomers = async (req, res) => {
           name: 1,
           email: 1,
           phone: 1,
-          points: 1, // 👈 include points field
+          total_points: 1, // 👈 include points field
           tier: { $arrayElemAt: ["$tier", 0] }, // flatten array
           app_type: { $arrayElemAt: ["$app_type", 0] }, // flatten array
         },

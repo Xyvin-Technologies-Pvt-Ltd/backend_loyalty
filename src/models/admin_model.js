@@ -24,6 +24,10 @@ const admin_schema = new mongoose.Schema({
         required: true,
         minlength: 8
     },
+    isFirstLogin: {
+        type: Boolean,
+        default: true
+    },
 
     // Role and Access
     role: {
@@ -48,6 +52,7 @@ const admin_schema = new mongoose.Schema({
     // Security
     passwordResetToken: String,
     passwordResetExpires: Date,
+    passwordChangedAt: Date,
     loginAttempts: {
         type: Number,
         default: 0
@@ -79,6 +84,7 @@ admin_schema.pre('save', async function (next) {
     try {
         const salt = await bcrypt.genSalt(10);
         this.password = await bcrypt.hash(this.password, salt);
+        this.passwordChangedAt = new Date();
         next();
     } catch (error) {
         next(error);

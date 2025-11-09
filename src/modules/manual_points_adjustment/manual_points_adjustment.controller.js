@@ -11,7 +11,7 @@ const LoyaltyPoints = require("../../models/loyalty_points_model");
 const PointsExpirationRules = require("../../models/points_expiration_rules_model");
 const AppType = require("../../models/app_type_model");
 
-const REQUIRED_BULK_COLUMNS = ["customer_id", "points", "point_criteria", "note"];
+const REQUIRED_BULK_COLUMNS = ["customer_id", "point_criteria", "note"];
 
 const normalizeString = (value) => (value || "").toString().trim();
 
@@ -161,13 +161,46 @@ const redeemPointsFIFO = async (customerId, pointsToRedeem, session) => {
   }
 };
 
+const getManualPointsForCriteria = (criteria) => {
+  if (
+    !criteria ||
+    !Array.isArray(criteria.pointSystem) ||
+    criteria.pointSystem.length === 0
+  ) {
+    return {
+      success: false,
+      message: "Point criteria is missing point system configuration",
+    };
+  }
+
+  const fixedEntry =
+    criteria.pointSystem.find((entry) => entry.pointType === "fixed") ||
+    criteria.pointSystem[0];
+
+  if (
+    !fixedEntry ||
+    !Number.isFinite(fixedEntry.pointRate) ||
+    fixedEntry.pointRate <= 0
+  ) {
+    return {
+      success: false,
+      message: "Point criteria does not have a valid fixed point rule",
+    };
+  }
+
+  return {
+    success: true,
+    points: fixedEntry.pointRate,
+    rule: fixedEntry,
+  };
+};
+
 const addPointsIndividual = async (req, res) => {
   const transaction = new SafeTransaction();
   const session = await transaction.start();
 
   try {
-    const { customer_id, points, point_criteria, requested_by, note } = req.body;
-    const numericPoints = Number(points);
+    const { customer_id, point_criteria, requested_by, note } = req.body;
 
     const customer = await Customer.findById(customer_id)
       .populate("tier")
@@ -183,10 +216,14 @@ const addPointsIndividual = async (req, res) => {
       return response_handler(res, 404, "Point criteria not found");
     }
 
-    if (!Number.isFinite(numericPoints) || numericPoints <= 0) {
+    const criteriaPoints = getManualPointsForCriteria(criteria);
+    if (!criteriaPoints.success) {
       await transaction.abort();
-      return response_handler(res, 400, "Points must be a positive number");
+      return response_handler(res, 400, criteriaPoints.message);
     }
+
+    const pointsToAward = criteriaPoints.points;
+    const pointRule = criteriaPoints.rule;
 
     const requestedAppType = await findAppType(requested_by, session);
 
@@ -195,8 +232,8 @@ const addPointsIndividual = async (req, res) => {
         {
           customer_id: customer._id,
           transaction_type: "earn",
-          points: numericPoints,
-          transaction_id: uuidv4(),
+          points: pointsToAward,
+          transaction_id: `PROMO-$${uuidv4().slice(0, 8)}`,
           point_criteria: criteria._id,
           app_type: requestedAppType?._id ?? null,
           status: "completed",
@@ -204,6 +241,10 @@ const addPointsIndividual = async (req, res) => {
           metadata: buildManualMetadata({
             requested_by,
             point_criteria_code: criteria.unique_code,
+            manual_point_rule: {
+              pointType: pointRule.pointType,
+              pointRate: pointRule.pointRate,
+            },
           }),
           transaction_date: new Date(),
         },
@@ -215,8 +256,8 @@ const addPointsIndividual = async (req, res) => {
       customer._id,
       {
         $inc: {
-          total_points: numericPoints,
-          coins: numericPoints,
+          total_points: pointsToAward,
+          coins: pointsToAward,
         },
       },
       { new: true, session }
@@ -236,7 +277,7 @@ const addPointsIndividual = async (req, res) => {
         [
           {
             customer_id: customer._id,
-            points: numericPoints,
+            points: pointsToAward,
             expiryDate,
             transaction_id: newTransaction[0]._id,
             earnedAt: new Date(),
@@ -255,11 +296,7 @@ const addPointsIndividual = async (req, res) => {
 
     try {
       const tierController = require("../tier/tier.controller");
-      await tierController.checkAndUpgradeTier(
-        customer._id,
-        null,
-        session
-      );
+      await tierController.checkAndUpgradeTier(customer._id, null, session);
     } catch (error) {
       logger.error(`Error evaluating tier upgrade: ${error.message}`, {
         customer_id,
@@ -272,6 +309,7 @@ const addPointsIndividual = async (req, res) => {
     return response_handler(res, 201, "Manual points added successfully", {
       transaction: newTransaction[0],
       point_balance: updatedCustomer.total_points,
+      points_awarded: pointsToAward,
     });
   } catch (error) {
     await transaction.abort();
@@ -365,9 +403,9 @@ const addPointsBulk = async (req, res) => {
       continue;
     }
 
-    const customer = await Customer.findOne({ customer_id: customerIdentifier }).populate(
-      "tier"
-    );
+    const customer = await Customer.findOne({
+      customer_id: customerIdentifier,
+    }).populate("tier");
     if (!customer) {
       validationErrors.push(
         `Row ${rowNumber}: Customer ${customerIdentifier} not found`
@@ -495,9 +533,12 @@ const addPointsBulk = async (req, res) => {
         );
       }
     } catch (error) {
-      logger.error(`Error evaluating tier upgrades for bulk upload: ${error.message}`, {
-        stack: error.stack,
-      });
+      logger.error(
+        `Error evaluating tier upgrades for bulk upload: ${error.message}`,
+        {
+          stack: error.stack,
+        }
+      );
     }
 
     await transaction.commit();
@@ -643,4 +684,3 @@ module.exports = {
   reducePoints,
   downloadSampleTemplate,
 };
-

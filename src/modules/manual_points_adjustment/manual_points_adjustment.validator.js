@@ -7,7 +7,6 @@ const objectId = Joi.string()
 
 const addIndividualSchema = Joi.object({
   customer_id: objectId.required(),
-  points: Joi.number().positive().required(),
   point_criteria: Joi.string().trim().required(),
   requested_by: Joi.string().trim().required(),
   note: Joi.string().trim().required(),

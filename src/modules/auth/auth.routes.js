@@ -56,6 +56,18 @@ router.post(
 
 router.get("/me", protect, auth_controller.getMe);
 
+router.put(
+  "/change-password",
+  protect,
+  authAudit.dataModification("change_password", {
+    description: "User changed password",
+    targetModel: "Admin",
+    targetId: (req) => req.admin?._id,
+  }),
+  authAudit.captureResponse(),
+  auth_controller.changePassword
+);
+
 router.get("/logout", auth_controller.logout);
 
 module.exports = router;

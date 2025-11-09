@@ -45,11 +45,7 @@ exports.admin_login = async (req, res) => {
       const error_messages = error.details.map((err) => err.message).join(", ");
       return response_handler(res, 400, `Invalid input: ${error_messages}`);
     }
-    const admin = await Admin.find({});
-    console.log(admin);
     const user = await Admin.findOne({ email: req.body.email });
-    console.log(user);
-    console.log(req.body.email);
     if (!user) {
       return response_handler(res, 400, "User not found.");
     }
@@ -63,8 +59,13 @@ exports.admin_login = async (req, res) => {
     }
 
     const jwt_token = await generate_admin_token(user._id);
+    user.lastLogin = new Date();
+    await user.save({ validateBeforeSave: false });
 
-    return response_handler(res, 200, "Login successful!", jwt_token);
+    return response_handler(res, 200, "Login successful!", {
+      token: jwt_token,
+      isFirstLogin: user.isFirstLogin,
+    });
   } catch (error) {
     return response_handler(
       res,
@@ -78,7 +79,7 @@ exports.getMe = async (req, res) => {
   try {
     const user = await Admin.findById(
       req.admin._id,
-      "name email _id status role"
+      "name email _id status role isFirstLogin passwordChangedAt"
     ).populate("role");
     return response_handler(
       res,
@@ -99,6 +100,49 @@ exports.logout = async (req, res) => {
   try {
     res.clearCookie("token");
     return response_handler(res, 200, "Logout successful!");
+  } catch (error) {
+    return response_handler(
+      res,
+      500,
+      `Internal Server Error. ${error.message}`
+    );
+  }
+};
+
+exports.changePassword = async (req, res) => {
+  try {
+    const { error } = validator.changePassword.validate(req.body, {
+      abortEarly: false,
+    });
+
+    if (error) {
+      const error_messages = error.details.map((err) => err.message).join(", ");
+      return response_handler(res, 400, `Invalid input: ${error_messages}`);
+    }
+
+    const admin = await Admin.findById(req.admin._id).select("+password");
+
+    if (!admin) {
+      return response_handler(res, 404, "User not found.");
+    }
+
+    const is_password_valid = await compare_passwords(
+      req.body.oldPassword,
+      admin.password
+    );
+
+    if (!is_password_valid) {
+      return response_handler(res, 400, "Current password is incorrect.");
+    }
+
+    admin.password = req.body.newPassword;
+    admin.isFirstLogin = false;
+    admin.passwordChangedAt = new Date();
+
+    await admin.save();
+    await admin.logActivity("PASSWORD_CHANGE", "Password updated");
+
+    return response_handler(res, 200, "Password changed successfully!");
   } catch (error) {
     return response_handler(
       res,
