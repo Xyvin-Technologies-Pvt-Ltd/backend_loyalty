@@ -255,7 +255,7 @@ function handleSuccessfulUpload(req, res, fieldUsed) {
   //find server adddress and add server address to the url
   let serverAddress = ''
   if(process.env.IMAGE_SERVER_ENV === 'UAT'){
-    serverAddress = 'http://http://141.105.172.45:7733'
+    serverAddress = 'http://141.105.172.45:7733'
   }else {
     serverAddress = 'https://khedmahloyalty.oifcoman.com:3737'
   }
