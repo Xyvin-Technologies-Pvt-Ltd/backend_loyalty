@@ -1,9 +1,9 @@
-name: Test-UAT Loyalty Backend
+name: UAT Loyalty Backend
 
 on:
   push:
     branches:
-      - main
+      - UAT
 
 jobs:
   deploy-backend:
