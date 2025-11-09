@@ -8,7 +8,7 @@ on:
 jobs:
   deploy-backend:
     name: Deploy Backend to VPN Server
-    runs-on: self-hosted
+    runs-on: [self-hosted, uat-backend]
 
     steps:
       # Step 1: Checkout the repository

@@ -48,9 +48,9 @@ const payment_method_routes = require("../modules/payment_method/payment_method.
 const upload_routes = require("../modules/upload/upload.routes");
 const dashboard_routes = require("../modules/dashboard/dashboard.routes")
 
-
 //new-kedmah-sdk-route 
 const new_kedmah_sdk_routes = require("../modules/new_kedmah_sdk/new_kedmah_sdk.routes");
+const manual_points_routes = require("../modules/manual_points_adjustment/manual_points_adjustment.routes");
 // Helper function to create separate swagger setup handlers
 const useSchema =
   (schema, options) =>
@@ -109,6 +109,7 @@ function registerRoutes(app, basePath) {
   app.use(`${basePath}/transaction`, transaction_routes);
   app.use(`${basePath}/customer`, customer_routes);
   app.use(`${basePath}/loyalty-points`, loyalty_points_routes);
+  app.use(`${basePath}/manual-points`, manual_points_routes);
   app.use(`${basePath}/coupon-brand`, coupon_brand_routes);
   app.use(`${basePath}/coupon-category`, coupon_category_routes);
   app.use(`${basePath}/customer-support`, customer_support_routes);
