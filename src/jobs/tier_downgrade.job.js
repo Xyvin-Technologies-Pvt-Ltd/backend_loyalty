@@ -4,7 +4,7 @@ const LoyaltyPoints = require("../models/loyalty_points_model");
 const Transaction = require("../models/transaction_model");
 const Tier = require("../models/tier_model");
 const TierEligibilityCriteria = require("../models/tier_eligibility_criteria_model");
-const AppType = require("../models/app_type_model");
+const PriorityCustomer = require("../models/priority_customer_model");
 const { SafeTransaction } = require("../helpers/transaction");
 
 /**
@@ -33,7 +33,8 @@ const checkTierRetentionEligibility = async (customer, tier, session) => {
     }
 
     // Check if customer has minimum points required for the tier for khedmah for all customers check
-    if (customer.total_points >= 0) { //!kedmah sepcific
+    if (customer.total_points >= 0) {
+      //!kedmah sepcific
       logger.info(
         `Customer ${customer._id} below tier points threshold, checking consecutive periods`,
         {
@@ -259,6 +260,74 @@ async function processPointsAndTiers() {
       try {
         const currentTier = customer.tier;
 
+        const priorityRecord = await PriorityCustomer.findOne({
+          customer_id: customer._id,
+          is_active: true,
+        })
+          .session(session)
+          .populate("tier_id");
+
+        const priorityTier = priorityRecord?.tier_id || null;
+
+        if (priorityTier) {
+          logger.debug(
+            `Priority protection found for customer ${customer._id}`,
+            {
+              minimumTier: priorityTier.name?.en || priorityTier.name,
+              minimumHierarchy: priorityTier.hierarchy_level,
+              currentHierarchy: currentTier?.hierarchy_level,
+            }
+          );
+        }
+
+        if (
+          priorityTier &&
+          currentTier &&
+          currentTier.hierarchy_level < priorityTier.hierarchy_level
+        ) {
+          await Customer.findByIdAndUpdate(
+            customer._id,
+            { tier: priorityTier._id },
+            { session }
+          );
+
+          await Transaction.create(
+            [
+              {
+                customer_id: customer._id,
+                transaction_type: "tier_protection_adjustment",
+                points: 0,
+                transaction_id: `TIER-PROTECT-${Date.now()}-${customer._id}`,
+                status: "completed",
+                note: `Priority protection enforced: upgraded to ${
+                  priorityTier.name?.en || priorityTier.name
+                } minimum tier`,
+                metadata: {
+                  previous_tier: currentTier.name?.en || currentTier.name,
+                  enforced_minimum_tier:
+                    priorityTier.name?.en || priorityTier.name,
+                  total_points: customer.total_points,
+                  reason: "priority_customer_protection",
+                },
+                transaction_date: now,
+              },
+            ],
+            { session }
+          );
+
+          logger.info(
+            `Priority protection enforced for customer ${customer._id}`,
+            {
+              customerId: customer._id,
+              previousTier: currentTier.name?.en || currentTier.name,
+              enforcedTier: priorityTier.name?.en || priorityTier.name,
+              totalPoints: customer.total_points,
+            }
+          );
+
+          continue;
+        }
+
         // Check if customer meets retention criteria for current tier
         const meetsRetentionCriteria = await checkTierRetentionEligibility(
           customer,
@@ -287,8 +356,38 @@ async function processPointsAndTiers() {
             }
           }
 
+          if (
+            priorityTier &&
+            newTier.hierarchy_level < priorityTier.hierarchy_level
+          ) {
+            logger.info(
+              `Priority protection applied for customer ${customer._id}: preventing downgrade below minimum tier`,
+              {
+                customerId: customer._id,
+                attemptedTier: newTier.name?.en || newTier.name,
+                minimumTier: priorityTier.name?.en || priorityTier.name,
+                totalPoints: customer.total_points,
+              }
+            );
+            newTier = priorityTier;
+          }
+
           // Only downgrade if the new tier is actually lower
           if (newTier.hierarchy_level < currentTier.hierarchy_level) {
+            if (newTier._id.toString() === currentTier._id.toString()) {
+              logger.info(
+                `Customer ${customer._id} retains ${
+                  currentTier.name?.en || currentTier.name
+                } tier due to priority protection`,
+                {
+                  customerId: customer._id,
+                  currentTier: currentTier.name?.en || currentTier.name,
+                  totalPoints: customer.total_points,
+                }
+              );
+              continue;
+            }
+
             await Customer.findByIdAndUpdate(
               customer._id,
               { tier: newTier._id },
@@ -305,7 +404,9 @@ async function processPointsAndTiers() {
                 fromTier: currentTier.name?.en || currentTier.name,
                 toTier: newTier.name?.en || newTier.name,
                 totalPoints: customer.total_points,
-                reason: "Failed to meet tier retention criteria",
+                reason: priorityTier
+                  ? "Failed to meet tier retention criteria (priority protected)"
+                  : "Failed to meet tier retention criteria",
               }
             );
 
@@ -327,7 +428,12 @@ async function processPointsAndTiers() {
                     previous_tier: currentTier.name?.en || currentTier.name,
                     new_tier: newTier.name?.en || newTier.name,
                     total_points: customer.total_points,
-                    downgrade_reason: "tier_retention_criteria_not_met",
+                    downgrade_reason: priorityTier
+                      ? "tier_retention_criteria_not_met_priority_protected"
+                      : "tier_retention_criteria_not_met",
+                    priority_minimum_tier: priorityTier
+                      ? priorityTier.name?.en || priorityTier.name
+                      : null,
                   },
                   transaction_date: now,
                 },
@@ -343,6 +449,9 @@ async function processPointsAndTiers() {
                 customerId: customer._id,
                 currentTier: currentTier.name?.en || currentTier.name,
                 totalPoints: customer.total_points,
+                priorityMinimumTier: priorityTier
+                  ? priorityTier.name?.en || priorityTier.name
+                  : null,
               }
             );
           }

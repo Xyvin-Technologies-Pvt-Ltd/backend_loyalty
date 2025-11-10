@@ -51,6 +51,7 @@ const dashboard_routes = require("../modules/dashboard/dashboard.routes")
 //new-kedmah-sdk-route 
 const new_kedmah_sdk_routes = require("../modules/new_kedmah_sdk/new_kedmah_sdk.routes");
 const manual_points_routes = require("../modules/manual_points_adjustment/manual_points_adjustment.routes");
+const priority_customer_routes = require("../modules/priority_customers/priority_customers.routes");
 // Helper function to create separate swagger setup handlers
 const useSchema =
   (schema, options) =>
@@ -114,6 +115,7 @@ function registerRoutes(app, basePath) {
   app.use(`${basePath}/coupon-category`, coupon_category_routes);
   app.use(`${basePath}/customer-support`, customer_support_routes);
   app.use(`${basePath}/sub-admin`, sub_admin_routes);
+  app.use(`${basePath}/priority-customers`, priority_customer_routes);
   // SDK routes
   app.use(`${basePath}/sdk/access-keys`, sdkAccessKeyRoutes);
   app.use(`${basePath}/sdk/api`, sdkApiRoutes);
