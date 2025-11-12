@@ -3,7 +3,7 @@ name: UAT Loyalty Backend
 on:
   push:
     branches:
-      - main
+      - main2
 
 jobs:
   deploy-backend:
