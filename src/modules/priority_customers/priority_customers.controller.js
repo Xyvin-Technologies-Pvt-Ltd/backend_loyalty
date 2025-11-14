@@ -34,13 +34,6 @@ const ensureCustomerExists = async (customerId) => {
   return customer;
 };
 
-const ensureMinimumTierIsValid = (customer, tier) => {
-  if (customer.tier && tier.hierarchy_level > customer.tier.hierarchy_level) {
-    throw new Error(
-      "Minimum tier cannot be higher than the customer's current tier"
-    );
-  }
-};
 
 const buildListPipeline = ({ search, tier_id, is_active }) => {
   const matchStage = {};
@@ -176,8 +169,6 @@ const createPriorityCustomer = async (req, res) => {
       ensureCustomerExists(customer_id),
       ensureTierExists(tier_id),
     ]);
-
-    ensureMinimumTierIsValid(customer, tier);
 
     const existing = await PriorityCustomer.findOne({
       customer_id,
@@ -364,8 +355,6 @@ const updatePriorityCustomer = async (req, res) => {
     }
 
     if (tierToAssign) {
-      const customer = await ensureCustomerExists(priorityCustomer.customer_id);
-      ensureMinimumTierIsValid(customer, tierToAssign);
       priorityCustomer.tier_id = tierToAssign._id;
     }
 

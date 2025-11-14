@@ -90,7 +90,7 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
         );
         usedLoyaltyPoints.push({
           loyalty_point_id: pointEntry._id,
-          original_points: pointEntry.points+pointsToUse,
+          original_points: pointEntry.points + pointsToUse,
           points_used: pointsToUse,
           fully_redeemed: false,
           expiryDate: pointEntry.expiryDate,
@@ -160,9 +160,8 @@ const checkTierEligibility = async (
     if (!criteria) {
       return {
         eligible: false,
-        reason: `No eligibility criteria configured for tier: ${
-          targetTier.name.en || targetTier.name
-        }`,
+        reason: `No eligibility criteria configured for tier: ${targetTier.name.en || targetTier.name
+          }`,
       };
     }
 
@@ -431,12 +430,12 @@ const viewCustomer = async (req, res) => {
       customer_tier: customer.tier ? customer.tier.name : "Bronze",
       next_tier: nextTier
         ? {
-            required_point: pointsNeeded.toString(),
-            en: nextTier.name.en || nextTier.name,
-            ar: nextTier.name.ar || nextTier.name,
-            // Include tier progress information if available
-            ...tierProgress,
-          }
+          required_point: pointsNeeded.toString(),
+          en: nextTier.name.en || nextTier.name,
+          ar: nextTier.name.ar || nextTier.name,
+          // Include tier progress information if available
+          ...tierProgress,
+        }
         : null,
     };
 
@@ -544,8 +543,7 @@ const addPoints = async (req, res) => {
       const missingDetails = criteriaMissingPaymentMethod
         .map(
           (item) =>
-            `${
-              item.criteria_code
+            `${item.criteria_code
             } (available: ${item.available_payment_methods.join(", ")})`
         )
         .join("; ");
@@ -718,9 +716,8 @@ const addPoints = async (req, res) => {
             points: totalPointsAwarded,
             payment_method: payment_method,
             status: "completed",
-            note: `Points earned via Khedmah SDK - ${
-              requested_by || "Khedmah SDK"
-            }`,
+            note: `Points earned via Khedmah SDK - ${requested_by || "Khedmah SDK"
+              }`,
             metadata: {
               items: transactionDetails,
               skipped_criteria: skippedCriteria, // Include skipped criteria info
@@ -1166,16 +1163,16 @@ const cancelRedemption = async (req, res) => {
         for (const usedLoyaltyPoint of usedLoyaltyPoints) {
           const loyaltyPointId = usedLoyaltyPoint.loyalty_point_id.toString();
           //if fully redeemed is true then
-          if(usedLoyaltyPoint.fully_redeemed){
-          await LoyaltyPoints.findByIdAndUpdate(
-            loyaltyPointId,
-              { points: usedLoyaltyPoint.points_used ,status: "active" },
+          if (usedLoyaltyPoint.fully_redeemed) {
+            await LoyaltyPoints.findByIdAndUpdate(
+              loyaltyPointId,
+              { points: usedLoyaltyPoint.points_used, status: "active" },
               { session }
             );
-          }else{
+          } else {
             //add points to old LoyaltyPoints (if not expired) and make active
-            const loyaltyPoint = await LoyaltyPoints.findById(loyaltyPointId,null, { session });
-            if(loyaltyPoint && loyaltyPoint.expiryDate > new Date()){
+            const loyaltyPoint = await LoyaltyPoints.findById(loyaltyPointId, null, { session });
+            if (loyaltyPoint && loyaltyPoint.expiryDate > new Date()) {
               await LoyaltyPoints.findByIdAndUpdate(
                 loyaltyPointId,
                 { points: loyaltyPoint.points + usedLoyaltyPoint.points_used, status: "active" },
@@ -1184,14 +1181,14 @@ const cancelRedemption = async (req, res) => {
             }
           }
         }
-       
+
 
         logger.info(
           `Loyalty points record created for cancelled redemption: ${customer_id}`,
           {
             customer_id,
             points: pointsToRestore,
-            
+
             original_transaction_id: transaction_id,
           }
         );
@@ -1612,8 +1609,8 @@ const getCouponDetails = async (req, res) => {
       );
     }
 
-    console.log('tiers',coupon.eligibilityCriteria.tiers);
-    console.log('tier',customer.tier);
+    console.log('tiers', coupon.eligibilityCriteria.tiers);
+    console.log('tier', customer.tier);
 
     //add extra feld in response if the custoemr is eligible based in the tier he has the coupon eleigibilityCriteria.tiers
     if (

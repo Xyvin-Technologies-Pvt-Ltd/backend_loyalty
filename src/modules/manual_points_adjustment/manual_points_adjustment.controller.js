@@ -379,17 +379,11 @@ const addPointsBulk = async (req, res) => {
     }
 
     const customerIdentifier = normalizeString(rawRow.customer_id);
-    const pointsValue = Number(rawRow.points);
     const criteriaIdentifier = normalizeString(rawRow.point_criteria);
     const note = normalizeString(rawRow.note);
 
     if (!customerIdentifier) {
       validationErrors.push(`Row ${rowNumber}: customer_id is required`);
-      continue;
-    }
-
-    if (!Number.isFinite(pointsValue) || pointsValue <= 0) {
-      validationErrors.push(`Row ${rowNumber}: points must be positive`);
       continue;
     }
 
@@ -421,11 +415,19 @@ const addPointsBulk = async (req, res) => {
       continue;
     }
 
+    const criteriaPoints = getManualPointsForCriteria(criteria);
+    if (!criteriaPoints.success) {
+      validationErrors.push(
+        `Row ${rowNumber}: ${criteriaPoints.message}`
+      );
+      continue;
+    }
+
     enrichedRows.push({
       rowNumber,
       customer,
       criteria,
-      points: pointsValue,
+      points: criteriaPoints.points,
       note,
     });
   }
@@ -455,7 +457,7 @@ const addPointsBulk = async (req, res) => {
             customer_id: customer._id,
             transaction_type: "earn",
             points,
-            transaction_id: uuidv4(),
+            transaction_id: `ADMIN-$${uuidv4().slice(0, 9)}`,
             point_criteria: criteria._id,
             app_type: requestedAppType?._id ?? null,
             status: "completed",
@@ -605,7 +607,7 @@ const reducePoints = async (req, res) => {
           customer_id: customer._id,
           transaction_type: "redeem",
           points: -numericPoints,
-          transaction_id: uuidv4(),
+          transaction_id: `ADMIN-$${uuidv4().slice(0, 7)}`,
           status: "completed",
           app_type: requestedAppType?._id ?? null,
           note: buildManualNote("reduction", note),
@@ -656,9 +658,9 @@ const reducePoints = async (req, res) => {
 const downloadSampleTemplate = async (req, res) => {
   const workbook = XLSX.utils.book_new();
   const sampleData = [
-    ["customer_id", "points", "point_criteria", "note"],
-    ["CUST000001", 100, "64f0c0a8b8c19f001234abcd", "Welcome bonus adjustment"],
-    ["CUST000002", 50, "LOYALTY-SUMMER-2024", "Manual compensation"],
+    ["customer_id", "point_criteria", "note"],
+    ["CUST000001", "64f0c0a8b8c19f001234abcd", "Welcome bonus adjustment"],
+    ["CUST000002", "LOYALTY-SUMMER-2024", "Manual compensation"],
   ];
 
   const worksheet = XLSX.utils.aoa_to_sheet(sampleData);

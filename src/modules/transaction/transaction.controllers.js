@@ -106,7 +106,7 @@ const getAllTransactions = async (req, res) => {
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit))
-      .populate("customer_id", "name email phone")
+      .populate("customer_id", "name email phone customer_id")
       .populate("point_criteria")
       .populate("app_type", "name description");
 
