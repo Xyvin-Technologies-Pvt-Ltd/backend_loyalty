@@ -209,6 +209,44 @@ const getReportData = async (req, res) => {
             const redeemTransactionCount = redeemStatsResult[0]?.transactionCount || 0;
             const redeemTotalPoints = redeemStatsResult[0]?.totalPoints || 0;
 
+            // Calculate opening balance for this app type (all transactions before start date)
+            const appTypeOpeningBalanceResult = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_date: { $lt: startDate },
+                        status: "completed",
+                        "metadata.requested_by": appTypeName,
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
+                },
+            ]);
+
+            const appTypeOpeningBalance = appTypeOpeningBalanceResult[0]?.total || 0;
+
+            // Calculate closing balance for this app type (all transactions up to end date)
+            const appTypeClosingBalanceResult = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_date: { $lte: endDate },
+                        status: "completed",
+                        "metadata.requested_by": appTypeName,
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
+                },
+            ]);
+
+            const appTypeClosingBalance = appTypeClosingBalanceResult[0]?.total || 0;
+
             reportData[appTypeName] = {
                 registeredUsers,
                 pointsEarning: {
@@ -221,6 +259,8 @@ const getReportData = async (req, res) => {
                     transactionCount: redeemTransactionCount,
                     totalPoints: redeemTotalPoints,
                 },
+                openingBalance: appTypeOpeningBalance,
+                closingBalance: appTypeClosingBalance,
             };
         }
 
@@ -517,18 +557,48 @@ const exportReportCSV = async (req, res) => {
         }
         csvRows.push("Total Points Redeemed," + redeemTotalPoints.join(","));
 
-        // Opening Balance row
+        // Opening Balance row - per app type
         const openingBalanceRow = ["Opening Balance"];
-        appTypes.forEach(() => {
-            openingBalanceRow.push(openingBalance);
-        });
+        for (const appType of appTypes) {
+            const result = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_date: { $lt: startDate },
+                        status: "completed",
+                        "metadata.requested_by": appType.name,
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
+                },
+            ]);
+            openingBalanceRow.push(result[0]?.total || 0);
+        }
         csvRows.push(openingBalanceRow.join(","));
 
-        // Closing Balance row
+        // Closing Balance row - per app type
         const closingBalanceRow = ["Closing Balance"];
-        appTypes.forEach(() => {
-            closingBalanceRow.push(closingBalance);
-        });
+        for (const appType of appTypes) {
+            const result = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_date: { $lte: endDate },
+                        status: "completed",
+                        "metadata.requested_by": appType.name,
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
+                },
+            ]);
+            closingBalanceRow.push(result[0]?.total || 0);
+        }
         csvRows.push(closingBalanceRow.join(","));
 
         // Generate CSV content
