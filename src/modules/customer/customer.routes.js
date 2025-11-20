@@ -8,6 +8,7 @@ const {
   deleteCustomer,
   getCustomerDashboard,
   importCustomersFromExcel,
+  exportCustomersToExcel,
 } = require("./customer.controllers");
 const { authorizePermission } = require("../../middlewares/auth/auth");
 const { createAuditMiddleware } = require("../audit");
@@ -34,6 +35,18 @@ router.get(
   }),
   cacheMiddleware(60, cacheKeys.allCustomers),
   getAllCustomers
+);
+
+// Export customers to Excel endpoint (must be before /:id route)
+router.get(
+  "/export",
+  authorizePermission("VIEW_CUSTOMERS"),
+  customerAudit.captureResponse(),
+  customerAudit.adminAction("view_customers", {
+    description: "Admin exported customers to Excel",
+    targetModel: "Customer",
+  }),
+  exportCustomersToExcel
 );
 
 router.get(

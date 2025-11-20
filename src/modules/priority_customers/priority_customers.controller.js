@@ -90,6 +90,24 @@ const buildListPipeline = ({ search, tier_id, is_active }) => {
         path: "$added_by",
         preserveNullAndEmptyArrays: true,
       },
+    },
+    {
+      $lookup: {
+        from: "tiers",
+        localField: "customer.tier",
+        foreignField: "_id",
+        as: "customer_tier",
+      },
+    },
+    {
+      $addFields: {
+        "customer.tier": { $arrayElemAt: ["$customer_tier", 0] },
+      },
+    },
+    {
+      $project: {
+        customer_tier: 0,
+      },
     }
   );
 

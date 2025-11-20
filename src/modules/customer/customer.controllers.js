@@ -90,6 +90,11 @@ const getAllCustomers = async (req, res) => {
       phone,
       app_type,
       status,
+      tier_id,
+      start_date,
+      end_date,
+      min_points,
+      max_points,
       sort_by = "createdAt",
       sort_order = "desc",
     } = req.query;
@@ -108,6 +113,29 @@ const getAllCustomers = async (req, res) => {
     }
     if (app_type) filter.app_type = app_type;
     if (status !== undefined) filter.status = status === "true";
+    if (tier_id && mongoose.Types.ObjectId.isValid(tier_id)) {
+      filter.tier = new mongoose.Types.ObjectId(tier_id);
+    }
+    if (start_date || end_date) {
+      filter.createdAt = {};
+      if (start_date) {
+        filter.createdAt.$gte = new Date(start_date);
+      }
+      if (end_date) {
+        const endDate = new Date(end_date);
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+    if (min_points !== undefined || max_points !== undefined) {
+      filter.total_points = {};
+      if (min_points !== undefined) {
+        filter.total_points.$gte = parseInt(min_points);
+      }
+      if (max_points !== undefined) {
+        filter.total_points.$lte = parseInt(max_points);
+      }
+    }
 
     // Build sort object
     const sort = {};
@@ -166,6 +194,139 @@ const getAllCustomers = async (req, res) => {
       res,
       500,
       "Failed to retrieve customers",
+      error.message
+    );
+  }
+};
+
+/**
+ * Export customers to Excel
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const exportCustomersToExcel = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      phone,
+      app_type,
+      status,
+      tier_id,
+      start_date,
+      end_date,
+      min_points,
+      max_points,
+      sort_by = "createdAt",
+      sort_order = "desc",
+    } = req.query;
+
+    // Build filter object (same as getAllCustomers but without pagination)
+    let filter = {};
+
+    if (name && name.trim() !== "") {
+      filter.$or = [
+        { name: { $regex: name, $options: "i" } },
+        { customer_id: { $regex: name, $options: "i" } },
+        { email: { $regex: name, $options: "i" } },
+        { phone: { $regex: name, $options: "i" } },
+      ];
+    }
+    if (app_type) filter.app_type = app_type;
+    if (status !== undefined) filter.status = status === "true";
+    if (tier_id && mongoose.Types.ObjectId.isValid(tier_id)) {
+      filter.tier = new mongoose.Types.ObjectId(tier_id);
+    }
+    if (start_date || end_date) {
+      filter.createdAt = {};
+      if (start_date) {
+        filter.createdAt.$gte = new Date(start_date);
+      }
+      if (end_date) {
+        const endDate = new Date(end_date);
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+    if (min_points !== undefined || max_points !== undefined) {
+      filter.total_points = {};
+      if (min_points !== undefined) {
+        filter.total_points.$gte = parseInt(min_points);
+      }
+      if (max_points !== undefined) {
+        filter.total_points.$lte = parseInt(max_points);
+      }
+    }
+
+    // Build sort object
+    const sort = {};
+    sort[sort_by] = sort_order === "asc" ? 1 : -1;
+
+    // Fetch all customers matching filters (no pagination)
+    const customers = await Customer.aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: "tiers",
+          localField: "tier",
+          foreignField: "_id",
+          as: "tier",
+        },
+      },
+      {
+        $lookup: {
+          from: "apptypes",
+          localField: "app_type",
+          foreignField: "_id",
+          as: "app_type",
+        },
+      },
+      {
+        $project: {
+          customer_id: 1,
+          name: 1,
+          total_points: 1,
+          tier: { $arrayElemAt: ["$tier", 0] },
+          app_type: { $arrayElemAt: ["$app_type", 0] },
+        },
+      },
+      { $sort: sort },
+    ]);
+
+    // Prepare data for Excel
+    const excelData = customers.map((customer) => ({
+      "Customer ID": customer.customer_id || "",
+      Name: customer.name || "",
+      "Registered Through": customer.app_type?.name?.en || customer.app_type?.name || "",
+      "Total Points": customer.total_points || 0,
+      Tier: customer.tier?.name?.en || customer.tier?.name || "",
+    }));
+
+    // Create workbook and worksheet
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Customers");
+
+    // Generate Excel buffer
+    const excelBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+
+    // Set response headers
+    const filename = `customers_export_${new Date().toISOString().split("T")[0]}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    return res.send(excelBuffer);
+  } catch (error) {
+    logger.error(`Error exporting customers to Excel: ${error.message}`);
+    return response_handler(
+      res,
+      500,
+      "Failed to export customers",
       error.message
     );
   }
@@ -597,4 +758,5 @@ module.exports = {
   deleteCustomer,
   getCustomerDashboard,
   importCustomersFromExcel,
+  exportCustomersToExcel,
 };
