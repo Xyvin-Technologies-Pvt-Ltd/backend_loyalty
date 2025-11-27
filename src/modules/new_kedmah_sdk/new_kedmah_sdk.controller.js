@@ -994,7 +994,6 @@ const redeemPoints = async (req, res) => {
     //   }
     //   // Apply tier multiplier if exists
     // }
-    console.log("pointsToRedeem", pointsToRedeem),console.log("customer total points", customer.total_points);
 
     // Use FIFO redemption logic
     const fifoResult = await redeemPointsFIFO(
