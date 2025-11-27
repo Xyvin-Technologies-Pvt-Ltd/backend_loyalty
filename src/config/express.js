@@ -13,6 +13,7 @@ const helmet = require("helmet");
 const { xss } = require("express-xss-sanitizer");
 const compression = require("compression");
 const { env } = require("./env");
+const { startScheduledJobs } = require("./jobs");
 
 
 // Get the appropriate upload path based on environment
@@ -112,7 +113,8 @@ function initializeExpress() {
     })
   );
 
-
+//start scheduled jobs
+startScheduledJobs();
 
 
  
