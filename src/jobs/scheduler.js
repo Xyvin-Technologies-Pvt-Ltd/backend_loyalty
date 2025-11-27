@@ -117,9 +117,6 @@ function initializeScheduledJobs() {
     //   `Tier downgrade scheduled to run on last day of each month at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     // );
     
-    logger.info(
-      `Tier downgrade scheduled to run manually at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
-    );
 
     logger.info("All jobs scheduled successfully");
   } catch (error) {
