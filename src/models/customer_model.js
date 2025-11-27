@@ -66,5 +66,8 @@ customer_schema.index({ customer_id: 1 });
 
 customer_schema.index({ app_type: 1 });
 
+// Critical indexes for reports performance
+customer_schema.index({ createdAt: 1, app_type: 1 });
+
 
 module.exports = Customer;

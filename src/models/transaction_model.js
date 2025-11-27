@@ -11,12 +11,12 @@ const transaction_schema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "CouponCode",
       default: null,
-    },  
+    },
     transaction_type: {
       type: String,
       required: true,
     },
-   
+
     points: {
       type: Number,
       required: true,
@@ -38,10 +38,10 @@ const transaction_schema = new mongoose.Schema(
     },
     payment_method: {
       type: String,
- // Separate logic for Khedmah & KhedmahPay
+      // Separate logic for Khedmah & KhedmahPay
       default: null,
     },
-   
+
     status: {
       type: String,
       trim: true,
@@ -93,6 +93,12 @@ transaction_schema.index({ customer_id: 1, transaction_type: 1 });
 // transaction_schema.index({ transaction_id: 1 }, { unique: true });
 transaction_schema.index({ reference_id: 1 });
 transaction_schema.index({ point_criteria: 1 });
+
+// Critical indexes for reports performance
+transaction_schema.index({ transaction_date: 1, status: 1, transaction_type: 1 });
+transaction_schema.index({ transaction_date: 1, status: 1, "metadata.requested_by": 1 });
+transaction_schema.index({ transaction_type: 1, status: 1, transaction_date: 1, "metadata.requested_by": 1 });
+transaction_schema.index({ transaction_id: 1, transaction_type: 1 }); // For PROMO and ADMIN regex queries
 
 const Transaction = mongoose.model("Transaction", transaction_schema);
 

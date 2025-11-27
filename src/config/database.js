@@ -12,7 +12,7 @@ const { NODE_ENV, MONGO_URL } = require('./env');
 const connectionOptions = {
     maxPoolSize: 10,
     serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
+    socketTimeoutMS: 120000, // 120 seconds - increased for heavy report queries
 };
 
 /**

@@ -89,306 +89,299 @@ const getReportData = async (req, res) => {
 
         const closingBalance = closingBalanceResult[0]?.total || 0;
 
-        // Process each app type
-        for (const appType of appTypes) {
+        // Process all app types in parallel for better performance
+        const processAppType = async (appType) => {
             const appTypeId = appType._id;
             const appTypeName = appType.name;
 
-            // 1. Registered Users Count - customers where app_type[0] matches and created within date range
-            // Using aggregation to check first element of array and createdAt date
-            const registeredUsersResult = await Customer.aggregate([
-                {
-                    $match: {
-                        app_type: { $exists: true, $ne: [] },
-                        createdAt: { $gte: startDate, $lte: endDate },
+            // Run all queries for this app type in parallel
+            const [
+                registeredUsersResult,
+                earnUserCountResult,
+                earnStatsResult,
+                redeemUserCountResult,
+                redeemStatsResult,
+                appTypeOpeningBalanceResult,
+                appTypeClosingBalanceResult,
+                promoPointsResult,
+                expiredPointsResult,
+                adjustedPointsResult,
+                adminReductionResult,
+            ] = await Promise.all([
+                // 1. Registered Users Count
+                Customer.aggregate([
+                    {
+                        $match: {
+                            app_type: { $exists: true, $ne: [] },
+                            createdAt: { $gte: startDate, $lte: endDate },
+                        },
                     },
-                },
-                {
-                    $project: {
-                        firstAppType: { $arrayElemAt: ["$app_type", 0] },
+                    {
+                        $project: {
+                            firstAppType: { $arrayElemAt: ["$app_type", 0] },
+                        },
                     },
-                },
-                {
-                    $match: {
-                        firstAppType: appTypeId,
+                    {
+                        $match: {
+                            firstAppType: appTypeId,
+                        },
                     },
-                },
-                {
-                    $count: "count",
-                },
-            ]);
-            const registeredUsers = registeredUsersResult[0]?.count || 0;
-
-            // 2. Points Earning
-            // Get distinct customers who earned points in date range
-            const earnUserCountResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "earn",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        "metadata.requested_by": appTypeName,
+                    {
+                        $count: "count",
                     },
-                },
-                {
-                    $group: {
-                        _id: "$customer_id",
+                ]),
+                // 2. Points Earning - User Count
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "earn",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-                {
-                    $count: "count",
-                },
-            ]);
-
-            const earnUserCount = earnUserCountResult[0]?.count || 0;
-
-            // Get transaction count and total points for earning
-            const earnStatsResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "earn",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        "metadata.requested_by": appTypeName,
+                    {
+                        $group: {
+                            _id: "$customer_id",
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        transactionCount: { $sum: 1 },
-                        totalPoints: { $sum: "$points" },
+                    {
+                        $count: "count",
                     },
-                },
-            ]);
-
-            const earnTransactionCount = earnStatsResult[0]?.transactionCount || 0;
-            const earnTotalPoints = earnStatsResult[0]?.totalPoints || 0;
-
-            // 3. Points Redeemed
-            // Get distinct customers who redeemed points in date range
-            const redeemUserCountResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "redeem",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        "metadata.requested_by": appTypeName,
+                ]),
+                // 2. Points Earning - Stats (combined query)
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "earn",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: "$customer_id",
+                    {
+                        $group: {
+                            _id: null,
+                            transactionCount: { $sum: 1 },
+                            totalPoints: { $sum: "$points" },
+                        },
                     },
-                },
-                {
-                    $count: "count",
-                },
-            ]);
-
-            const redeemUserCount = redeemUserCountResult[0]?.count || 0;
-
-            // Get transaction count and total points for redemption
-            const redeemStatsResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "redeem",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        "metadata.requested_by": appTypeName,
+                ]),
+                // 3. Points Redeemed - User Count
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "redeem",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        transactionCount: { $sum: 1 },
-                        totalPoints: { $sum: { $abs: "$points" } },
+                    {
+                        $group: {
+                            _id: "$customer_id",
+                        },
                     },
-                },
-            ]);
-
-            const redeemTransactionCount = redeemStatsResult[0]?.transactionCount || 0;
-            const redeemTotalPoints = redeemStatsResult[0]?.totalPoints || 0;
-
-            // Calculate opening balance for this app type (all transactions before start date)
-            const appTypeOpeningBalanceResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_date: { $lt: startDate },
-                        status: "completed",
-                        "metadata.requested_by": appTypeName,
+                    {
+                        $count: "count",
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        total: { $sum: "$points" },
+                ]),
+                // 3. Points Redeemed - Stats (combined query)
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "redeem",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-            ]);
-
-            const appTypeOpeningBalance = appTypeOpeningBalanceResult[0]?.total || 0;
-
-            // Calculate closing balance for this app type (all transactions up to end date)
-            const appTypeClosingBalanceResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_date: { $lte: endDate },
-                        status: "completed",
-                        "metadata.requested_by": appTypeName,
+                    {
+                        $group: {
+                            _id: null,
+                            transactionCount: { $sum: 1 },
+                            totalPoints: { $sum: { $abs: "$points" } },
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        total: { $sum: "$points" },
+                ]),
+                // Opening Balance
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_date: { $lt: startDate },
+                            status: "completed",
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-            ]);
-
-            const appTypeClosingBalance = appTypeClosingBalanceResult[0]?.total || 0;
-
-            // 4. Total Promotion Points - transactions with PROMO in transaction_id
-            const promoPointsResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "earn",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        transaction_id: { $regex: /^PROMO-/ },
-                        "metadata.requested_by": appTypeName,
+                    {
+                        $group: {
+                            _id: null,
+                            total: { $sum: "$points" },
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalPoints: { $sum: "$points" },
+                ]),
+                // Closing Balance
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_date: { $lte: endDate },
+                            status: "completed",
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-            ]);
-            const totalPromoPoints = promoPointsResult[0]?.totalPoints || 0;
-
-            // 5. Total Points Expired
-            const expiredPointsResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "expire",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        "metadata.requested_by": appTypeName,
+                    {
+                        $group: {
+                            _id: null,
+                            total: { $sum: "$points" },
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalPoints: { $sum: { $abs: "$points" } },
+                ]),
+                // 4. Total Promotion Points
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "earn",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            transaction_id: { $regex: /^PROMO-/ },
+                            "metadata.requested_by": appTypeName,
+                        },
                     },
-                },
-            ]);
-            const totalExpiredPoints = expiredPointsResult[0]?.totalPoints || 0;
-
-            // 6. Total Points Adjusted
-            // For adjust transactions, check original transaction's requested_by if original_transaction_id exists
-            const adjustedPointsResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "adjust",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
+                    {
+                        $group: {
+                            _id: null,
+                            totalPoints: { $sum: "$points" },
+                        },
                     },
-                },
-                {
-                    $lookup: {
-                        from: "transactions",
-                        let: { originalTxId: "$metadata.original_transaction_id" },
-                        pipeline: [
-                            {
-                                $match: {
-                                    $expr: {
-                                        $eq: ["$transaction_id", "$$originalTxId"],
+                ]),
+                // 5. Total Points Expired
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "expire",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            "metadata.requested_by": appTypeName,
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalPoints: { $sum: { $abs: "$points" } },
+                        },
+                    },
+                ]),
+                // 6. Total Points Adjusted
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "adjust",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                        },
+                    },
+                    {
+                        $lookup: {
+                            from: "transactions",
+                            let: { originalTxId: "$metadata.original_transaction_id" },
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $eq: ["$transaction_id", "$$originalTxId"],
+                                        },
                                     },
                                 },
-                            },
-                            {
-                                $project: {
-                                    requested_by: "$metadata.requested_by",
+                                {
+                                    $project: {
+                                        requested_by: "$metadata.requested_by",
+                                    },
                                 },
-                            },
-                        ],
-                        as: "originalTransaction",
+                            ],
+                            as: "originalTransaction",
+                        },
                     },
-                },
-                {
-                    $addFields: {
-                        effectiveRequestedBy: {
-                            $cond: {
-                                if: {
-                                    $and: [
-                                        { $ne: ["$metadata.original_transaction_id", null] },
-                                        { $gt: [{ $size: "$originalTransaction" }, 0] },
-                                    ],
+                    {
+                        $addFields: {
+                            effectiveRequestedBy: {
+                                $cond: {
+                                    if: {
+                                        $and: [
+                                            { $ne: ["$metadata.original_transaction_id", null] },
+                                            { $gt: [{ $size: "$originalTransaction" }, 0] },
+                                        ],
+                                    },
+                                    then: {
+                                        $arrayElemAt: ["$originalTransaction.requested_by", 0],
+                                    },
+                                    else: "$metadata.requested_by",
                                 },
-                                then: {
-                                    $arrayElemAt: ["$originalTransaction.requested_by", 0],
-                                },
-                                else: "$metadata.requested_by",
                             },
                         },
                     },
-                },
-                {
-                    $match: {
-                        effectiveRequestedBy: appTypeName,
+                    {
+                        $match: {
+                            effectiveRequestedBy: appTypeName,
+                        },
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalPoints: { $sum: "$points" },
+                    {
+                        $group: {
+                            _id: null,
+                            totalPoints: { $sum: "$points" },
+                        },
                     },
-                },
+                ]),
+                // 7. Admin Manual Point Reduction
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "redeem",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            transaction_id: { $regex: /^ADMIN-/ },
+                            "metadata.requested_by": appTypeName,
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalPoints: { $sum: { $abs: "$points" } },
+                        },
+                    },
+                ]),
             ]);
-            const totalAdjustedPoints = adjustedPointsResult[0]?.totalPoints || 0;
 
-            // 7. Admin Manual Point Reduction - redeem transactions with ADMIN in transaction_id
-            const adminReductionResult = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "redeem",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        transaction_id: { $regex: /^ADMIN-/ },
-                        "metadata.requested_by": appTypeName,
+            return {
+                appTypeName,
+                data: {
+                    registeredUsers: registeredUsersResult[0]?.count || 0,
+                    pointsEarning: {
+                        userCount: earnUserCountResult[0]?.count || 0,
+                        transactionCount: earnStatsResult[0]?.transactionCount || 0,
+                        totalPoints: earnStatsResult[0]?.totalPoints || 0,
                     },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalPoints: { $sum: { $abs: "$points" } },
+                    pointsRedeemed: {
+                        userCount: redeemUserCountResult[0]?.count || 0,
+                        transactionCount: redeemStatsResult[0]?.transactionCount || 0,
+                        totalPoints: redeemStatsResult[0]?.totalPoints || 0,
                     },
+                    openingBalance: appTypeOpeningBalanceResult[0]?.total || 0,
+                    closingBalance: appTypeClosingBalanceResult[0]?.total || 0,
+                    totalPromoPoints: promoPointsResult[0]?.totalPoints || 0,
+                    totalExpiredPoints: expiredPointsResult[0]?.totalPoints || 0,
+                    totalAdjustedPoints: adjustedPointsResult[0]?.totalPoints || 0,
+                    adminReductionPoints: adminReductionResult[0]?.totalPoints || 0,
                 },
-            ]);
-            const adminReductionPoints = adminReductionResult[0]?.totalPoints || 0;
-
-            reportData[appTypeName] = {
-                registeredUsers,
-                pointsEarning: {
-                    userCount: earnUserCount,
-                    transactionCount: earnTransactionCount,
-                    totalPoints: earnTotalPoints,
-                },
-                pointsRedeemed: {
-                    userCount: redeemUserCount,
-                    transactionCount: redeemTransactionCount,
-                    totalPoints: redeemTotalPoints,
-                },
-                openingBalance: appTypeOpeningBalance,
-                closingBalance: appTypeClosingBalance,
-                totalPromoPoints,
-                totalExpiredPoints,
-                totalAdjustedPoints,
-                adminReductionPoints,
             };
-        }
+        };
+
+        // Process all app types in parallel
+        const appTypeResults = await Promise.all(appTypes.map(processAppType));
+
+        // Build reportData object from results
+        appTypeResults.forEach((result) => {
+            reportData[result.appTypeName] = result.data;
+        });
 
         // Calculate global totals
         let totalRegisteredUsers = 0;
