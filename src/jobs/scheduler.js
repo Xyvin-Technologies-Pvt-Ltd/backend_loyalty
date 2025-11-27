@@ -116,7 +116,7 @@ function initializeScheduledJobs() {
     // logger.info(
     //   `Tier downgrade scheduled to run on last day of each month at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     // );
-    scheduleNow(processExpiredPoints, "manual");
+    
     logger.info(
       `Tier downgrade scheduled to run manually at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     );
