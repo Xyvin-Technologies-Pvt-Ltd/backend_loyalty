@@ -1,35 +1,39 @@
 const { logger } = require("../middlewares/logger");
-const { processPointsAndTiers } = require("./tier_downgrade.job");
+const moment = require("moment-timezone");
+const { processExpiredPoints } = require("./point_expiry_checker.job");
+const { processTierDowngrades } = require("./tier_downgrade.job");
+
+const OMAN_TIMEZONE = "Asia/Muscat";
+const SCHEDULED_HOUR = 2; // 2 AM
+const SCHEDULED_MINUTE = 0;
 
 
-function scheduleDaily(job, hour, minute) {
-  const now = new Date();
-  let scheduledTime = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    hour,
-    minute,
-    0
-  );
+function scheduleDaily(job, hour, minute, jobType = "daily") {
+  const now = moment().tz(OMAN_TIMEZONE);
+  let scheduledTime = moment()
+    .tz(OMAN_TIMEZONE)
+    .hour(hour)
+    .minute(minute)
+    .second(0)
+    .millisecond(0);
 
   // If the time has already passed today, schedule for tomorrow
-  if (scheduledTime <= now) {
-    scheduledTime.setDate(scheduledTime.getDate() + 1);
+  if (scheduledTime.isBefore(now) || scheduledTime.isSame(now)) {
+    scheduledTime.add(1, "day");
   }
 
-  const timeUntilExecution = scheduledTime - now;
+  const timeUntilExecution = scheduledTime.diff(now);
 
   logger.info(
-    `Scheduling job to run at ${scheduledTime.toLocaleTimeString()} (in ${Math.round(
-      timeUntilExecution / 60000
-    )} minutes)`
+    `Scheduling daily job to run at ${scheduledTime.format(
+      "YYYY-MM-DD HH:mm:ss"
+    )} Oman time (in ${Math.round(timeUntilExecution / 60000)} minutes)`
   );
 
   // Schedule the first execution
   const timer = setTimeout(async () => {
     try {
-      await job();
+      await job(jobType);
     } catch (error) {
       logger.error(`Error executing scheduled job: ${error.message}`, {
         stack: error.stack,
@@ -37,51 +41,63 @@ function scheduleDaily(job, hour, minute) {
     }
 
     // Schedule the job to run again tomorrow
-    scheduleDaily(job, hour, minute);
+    scheduleDaily(job, hour, minute, jobType);
   }, timeUntilExecution);
 
   return timer;
 }
 
 
-function scheduleMonthly(job) {
-  const now = new Date();
-  let scheduledTime = new Date(
-    now.getFullYear(),
-    now.getMonth() + 1, // Next month
-    1, // First day of month
-    0, // Midnight (00:00)
-    0,
-    0
-  );
+function scheduleMonthly(job, jobType = "monthly") {
+  const now = moment().tz(OMAN_TIMEZONE);
 
-  const timeUntilExecution = scheduledTime - now;
+  let scheduledTime = moment()
+    .tz(OMAN_TIMEZONE)
+    .endOf("month")
+    .hour(SCHEDULED_HOUR)
+    .minute(SCHEDULED_MINUTE)
+    .second(0)
+    .millisecond(0);
+
+  // If the time has already passed this month, schedule for next month's last day
+  if (scheduledTime.isBefore(now) || scheduledTime.isSame(now)) {
+    scheduledTime = moment()
+      .tz(OMAN_TIMEZONE)
+      .add(1, "month")
+      .endOf("month")
+      .hour(SCHEDULED_HOUR)
+      .minute(SCHEDULED_MINUTE)
+      .second(0)
+      .millisecond(0);
+  }
+
+  const timeUntilExecution = scheduledTime.diff(now);
 
   logger.info(
-    `Scheduling monthly job to run at ${scheduledTime.toLocaleString()} (in ${Math.round(
-      timeUntilExecution / 3600000
-    )} hours)`
+    `Scheduling monthly job to run on last day of month at ${scheduledTime.format(
+      "YYYY-MM-DD HH:mm:ss"
+    )} Oman time (in ${Math.round(timeUntilExecution / 3600000)} hours)`
   );
 
   // Schedule the first execution
   const timer = setTimeout(async () => {
     try {
-      await job();
+      await job(jobType);
     } catch (error) {
       logger.error(`Error executing monthly scheduled job: ${error.message}`, {
         stack: error.stack,
       });
     }
 
-    // Schedule the job to run again next month
-    scheduleMonthly(job);
+    // Schedule the job to run again next month's last day
+    scheduleMonthly(job, jobType);
   }, timeUntilExecution);
 
   return timer;
 }
 
-function scheduleNow(job) {
-  job();
+function scheduleNow(job, jobType = "manual") {
+  job(jobType);
 }
 
 
@@ -89,13 +105,18 @@ function initializeScheduledJobs() {
   try {
     logger.info("Initializing scheduled jobs");
 
-    // Schedule expired points processing to run at 1:00 AM daily
+    // Schedule point expiry checker to run daily at 2 AM Oman time
+    scheduleDaily(processExpiredPoints, SCHEDULED_HOUR, SCHEDULED_MINUTE, "daily");
+    logger.info(
+      `Point expiry checker scheduled to run daily at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
+    );
 
-    // Schedule points expiration and tier downgrade to run at midnight on first day of each month
-    // scheduleMonthly(processPointsAndTiers);
-    // scheduleDaily(processPointsAndTiers, 1, 0);
-    // scheduleNow(processPointsAndTiers);
-    // Add more scheduled jobs here as needed
+    // // Schedule tier downgrade to run on last day of each month at 2 AM Oman time
+    // scheduleMonthly(processTierDowngrades, "monthly");
+    // logger.info(
+    //   `Tier downgrade scheduled to run on last day of each month at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
+    // );
+    
 
     logger.info("All jobs scheduled successfully");
   } catch (error) {
