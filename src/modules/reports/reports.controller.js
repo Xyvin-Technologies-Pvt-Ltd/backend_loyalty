@@ -96,6 +96,8 @@ const getReportData = async (req, res) => {
 
             // Run all queries for this app type in parallel
             const [
+                openingUserCountResult,
+                closingUserCountResult,
                 registeredUsersResult,
                 earnUserCountResult,
                 earnStatsResult,
@@ -104,10 +106,53 @@ const getReportData = async (req, res) => {
                 appTypeOpeningBalanceResult,
                 appTypeClosingBalanceResult,
                 promoPointsResult,
-                expiredPointsResult,
                 adjustedPointsResult,
                 adminReductionResult,
             ] = await Promise.all([
+                // 0. Opening User Count
+                Customer.aggregate([
+                    {
+                        $match: {
+                            app_type: { $exists: true, $ne: [] },
+                            createdAt: { $lt: startDate },
+                        },
+                    },
+                    {
+                        $project: {
+                            firstAppType: { $arrayElemAt: ["$app_type", 0] },
+                        },
+                    },
+                    {
+                        $match: {
+                            firstAppType: appTypeId,
+                        },
+                    },
+                    {
+                        $count: "count",
+                    },
+                ]),
+                // 0. Closing User Count
+                Customer.aggregate([
+                    {
+                        $match: {
+                            app_type: { $exists: true, $ne: [] },
+                            createdAt: { $lte: endDate },
+                        },
+                    },
+                    {
+                        $project: {
+                            firstAppType: { $arrayElemAt: ["$app_type", 0] },
+                        },
+                    },
+                    {
+                        $match: {
+                            firstAppType: appTypeId,
+                        },
+                    },
+                    {
+                        $count: "count",
+                    },
+                ]),
                 // 1. Registered Users Count
                 Customer.aggregate([
                     {
@@ -200,7 +245,7 @@ const getReportData = async (req, res) => {
                         $group: {
                             _id: null,
                             transactionCount: { $sum: 1 },
-                            totalPoints: { $sum: { $abs: "$points" } },
+                            totalPoints: { $sum: "$points" },
                         },
                     },
                 ]),
@@ -251,23 +296,6 @@ const getReportData = async (req, res) => {
                         $group: {
                             _id: null,
                             totalPoints: { $sum: "$points" },
-                        },
-                    },
-                ]),
-                // 5. Total Points Expired
-                Transaction.aggregate([
-                    {
-                        $match: {
-                            transaction_type: "expire",
-                            status: "completed",
-                            transaction_date: { $gte: startDate, $lte: endDate },
-                            "metadata.requested_by": appTypeName,
-                        },
-                    },
-                    {
-                        $group: {
-                            _id: null,
-                            totalPoints: { $sum: { $abs: "$points" } },
                         },
                     },
                 ]),
@@ -345,7 +373,7 @@ const getReportData = async (req, res) => {
                     {
                         $group: {
                             _id: null,
-                            totalPoints: { $sum: { $abs: "$points" } },
+                            totalPoints: { $sum: "$points" },
                         },
                     },
                 ]),
@@ -354,6 +382,8 @@ const getReportData = async (req, res) => {
             return {
                 appTypeName,
                 data: {
+                    openingUserCount: openingUserCountResult[0]?.count || 0,
+                    closingUserCount: closingUserCountResult[0]?.count || 0,
                     registeredUsers: registeredUsersResult[0]?.count || 0,
                     pointsEarning: {
                         userCount: earnUserCountResult[0]?.count || 0,
@@ -368,12 +398,30 @@ const getReportData = async (req, res) => {
                     openingBalance: appTypeOpeningBalanceResult[0]?.total || 0,
                     closingBalance: appTypeClosingBalanceResult[0]?.total || 0,
                     totalPromoPoints: promoPointsResult[0]?.totalPoints || 0,
-                    totalExpiredPoints: expiredPointsResult[0]?.totalPoints || 0,
                     totalAdjustedPoints: adjustedPointsResult[0]?.totalPoints || 0,
                     adminReductionPoints: adminReductionResult[0]?.totalPoints || 0,
                 },
             };
         };
+
+        // Calculate global expiration (central activity, not app-specific)
+        const expiredPointsResult = await Transaction.aggregate([
+            {
+                $match: {
+                    transaction_type: "expire",
+                    status: "completed",
+                    transaction_date: { $gte: startDate, $lte: endDate },
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalPoints: { $sum: "$points" },
+                },
+            },
+        ]);
+
+        const totalExpiredPoints = expiredPointsResult[0]?.totalPoints || 0;
 
         // Process all app types in parallel
         const appTypeResults = await Promise.all(appTypes.map(processAppType));
@@ -384,6 +432,8 @@ const getReportData = async (req, res) => {
         });
 
         // Calculate global totals
+        let totalOpeningUserCount = 0;
+        let totalClosingUserCount = 0;
         let totalRegisteredUsers = 0;
         let totalEarnUserCount = 0;
         let totalEarnTransactionCount = 0;
@@ -392,7 +442,6 @@ const getReportData = async (req, res) => {
         let totalRedeemTransactionCount = 0;
         let totalRedeemTotalPoints = 0;
         let totalPromoPoints = 0;
-        let totalExpiredPoints = 0;
         let totalAdjustedPoints = 0;
         let totalAdminReductionPoints = 0;
         let totalOpeningBalance = 0;
@@ -400,6 +449,8 @@ const getReportData = async (req, res) => {
 
         for (const appType of appTypes) {
             const appTypeData = reportData[appType.name];
+            totalOpeningUserCount += appTypeData.openingUserCount;
+            totalClosingUserCount += appTypeData.closingUserCount;
             totalRegisteredUsers += appTypeData.registeredUsers;
             totalEarnUserCount += appTypeData.pointsEarning.userCount;
             totalEarnTransactionCount += appTypeData.pointsEarning.transactionCount;
@@ -408,7 +459,6 @@ const getReportData = async (req, res) => {
             totalRedeemTransactionCount += appTypeData.pointsRedeemed.transactionCount;
             totalRedeemTotalPoints += appTypeData.pointsRedeemed.totalPoints;
             totalPromoPoints += appTypeData.totalPromoPoints;
-            totalExpiredPoints += appTypeData.totalExpiredPoints;
             totalAdjustedPoints += appTypeData.totalAdjustedPoints;
             totalAdminReductionPoints += appTypeData.adminReductionPoints;
             totalOpeningBalance += appTypeData.openingBalance;
@@ -416,11 +466,8 @@ const getReportData = async (req, res) => {
         }
 
         // Calculate Net Movement
-        // Net Movement = Total Points Earned - Total Points Redeemed - Total Points Expired - Admin Manual Reduction + Total Promotion Points + Total Points Adjusted
-        // Note: Promotion points are already included in Total Points Earned, so we need to adjust
-        // Actually, looking at the CSV format, Net Movement seems to be: Earned - Redeemed - Expired - Admin Reduction + Adjusted
-        // Promotion points might be separate. Let me recalculate: Earned includes promo, so Net = Earned - Redeemed - Expired - Admin + Adjusted
-        const netMovement = totalEarnTotalPoints - totalRedeemTotalPoints - totalExpiredPoints - totalAdminReductionPoints + totalAdjustedPoints;
+        // Since all points already have correct signs, simply sum all values
+        const netMovement = totalEarnTotalPoints + totalRedeemTotalPoints + totalExpiredPoints + totalAdjustedPoints + totalAdminReductionPoints;
 
         const response = {
             appTypes: appTypes.map((at) => ({
@@ -431,6 +478,8 @@ const getReportData = async (req, res) => {
             openingBalance,
             closingBalance,
             totals: {
+                openingUserCount: totalOpeningUserCount,
+                closingUserCount: totalClosingUserCount,
                 registeredUsers: totalRegisteredUsers,
                 pointsEarning: {
                     userCount: totalEarnUserCount,
@@ -551,6 +600,12 @@ const exportReportCSV = async (req, res) => {
         // Build CSV data
         const csvRows = [];
 
+        // Add date range header
+        csvRows.push("Report Period:");
+        csvRows.push(`Start Date: ${startDate.toISOString().split("T")[0]}`);
+        csvRows.push(`End Date: ${endDate.toISOString().split("T")[0]}`);
+        csvRows.push(""); // Blank row before data headers
+
         // Header row
         const headerRow = [""];
         appTypes.forEach((appType) => {
@@ -558,6 +613,38 @@ const exportReportCSV = async (req, res) => {
         });
         headerRow.push("Total");
         csvRows.push(headerRow.join(","));
+
+        // Opening User Count row - per app type and total
+        const openingUserCountRow = ["Opening User Count"];
+        let totalOpeningUserCount = 0;
+        for (const appType of appTypes) {
+            const result = await Customer.aggregate([
+                {
+                    $match: {
+                        app_type: { $exists: true, $ne: [] },
+                        createdAt: { $lt: startDate },
+                    },
+                },
+                {
+                    $project: {
+                        firstAppType: { $arrayElemAt: ["$app_type", 0] },
+                    },
+                },
+                {
+                    $match: {
+                        firstAppType: appType._id,
+                    },
+                },
+                {
+                    $count: "count",
+                },
+            ]);
+            const count = result[0]?.count || 0;
+            openingUserCountRow.push(count);
+            totalOpeningUserCount += count;
+        }
+        openingUserCountRow.push(totalOpeningUserCount);
+        csvRows.push(openingUserCountRow.join(","));
 
         // Opening Balance row - per app type and total
         const openingBalanceRow = ["Opening Balance"];
@@ -645,6 +732,38 @@ const exportReportCSV = async (req, res) => {
         }
         newRegistrationRow.push(totalRegisteredUsers);
         csvRows.push(newRegistrationRow.join(","));
+
+        // Closing User Count row - per app type and total
+        const closingUserCountRow = ["Closing User Count"];
+        let totalClosingUserCount = 0;
+        for (const appType of appTypes) {
+            const result = await Customer.aggregate([
+                {
+                    $match: {
+                        app_type: { $exists: true, $ne: [] },
+                        createdAt: { $lte: endDate },
+                    },
+                },
+                {
+                    $project: {
+                        firstAppType: { $arrayElemAt: ["$app_type", 0] },
+                    },
+                },
+                {
+                    $match: {
+                        firstAppType: appType._id,
+                    },
+                },
+                {
+                    $count: "count",
+                },
+            ]);
+            const count = result[0]?.count || 0;
+            closingUserCountRow.push(count);
+            totalClosingUserCount += count;
+        }
+        closingUserCountRow.push(totalClosingUserCount);
+        csvRows.push(closingUserCountRow.join(","));
 
         // Closing Balance row - per app type and total
         const closingBalanceRow = ["Closing Balance"];
@@ -861,7 +980,7 @@ const exportReportCSV = async (req, res) => {
                 {
                     $group: {
                         _id: null,
-                        total: { $sum: { $abs: "$points" } },
+                        total: { $sum: "$points" },
                     },
                 },
             ]);
@@ -871,33 +990,6 @@ const exportReportCSV = async (req, res) => {
         }
         redeemTotalPoints.push(totalRedeemTotalPoints);
         csvRows.push("Total Points Redeemed," + redeemTotalPoints.join(","));
-
-        // Total Points Expired row
-        const expiredPointsRow = ["Total Points Expired"];
-        let totalExpiredPoints = 0;
-        for (const appType of appTypes) {
-            const result = await Transaction.aggregate([
-                {
-                    $match: {
-                        transaction_type: "expire",
-                        status: "completed",
-                        transaction_date: { $gte: startDate, $lte: endDate },
-                        "metadata.requested_by": appType.name,
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        total: { $sum: { $abs: "$points" } },
-                    },
-                },
-            ]);
-            const total = result[0]?.total || 0;
-            expiredPointsRow.push(total);
-            totalExpiredPoints += total;
-        }
-        expiredPointsRow.push(totalExpiredPoints);
-        csvRows.push(expiredPointsRow.join(","));
 
         // Total Points Adjusted row
         const adjustedPointsRow = ["Total Points Adjusted/Withdrawal"];
@@ -969,6 +1061,31 @@ const exportReportCSV = async (req, res) => {
         adjustedPointsRow.push(totalAdjustedPoints);
         csvRows.push(adjustedPointsRow.join(","));
 
+        // Total Points Expired row (Global - central activity, not app-specific)
+        const expiredPointsResult = await Transaction.aggregate([
+            {
+                $match: {
+                    transaction_type: "expire",
+                    status: "completed",
+                    transaction_date: { $gte: startDate, $lte: endDate },
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: "$points" },
+                },
+            },
+        ]);
+        const totalExpiredPoints = expiredPointsResult[0]?.total || 0;
+        const expiredPointsRow = ["Total Points Expired (Global)"];
+        // Add empty cells for each app type column
+        for (let i = 0; i < appTypes.length; i++) {
+            expiredPointsRow.push("");
+        }
+        expiredPointsRow.push(totalExpiredPoints);
+        csvRows.push(expiredPointsRow.join(","));
+
         // Admin Manual Point Reduction row
         const adminReductionRow = ["Admin Manual Point Reduction"];
         let totalAdminReductionPoints = 0;
@@ -986,7 +1103,7 @@ const exportReportCSV = async (req, res) => {
                 {
                     $group: {
                         _id: null,
-                        total: { $sum: { $abs: "$points" } },
+                        total: { $sum: "$points" },
                     },
                 },
             ]);
@@ -998,20 +1115,72 @@ const exportReportCSV = async (req, res) => {
         csvRows.push(adminReductionRow.join(","));
 
         // Net Movement row
-        const netMovement = totalEarnTotalPoints - totalRedeemTotalPoints - totalExpiredPoints - totalAdminReductionPoints + totalAdjustedPoints;
+        // Since all points already have correct signs, simply sum all values
+        // For per-app-type: earned + redeemed + adjusted + adminReduction (no expiration since it's global)
         const netMovementRow = ["Net Movement"];
-        // Calculate per app type net movement
         for (let i = 0; i < appTypes.length; i++) {
             const appTypeEarned = earnTotalPoints[i] || 0;
             const appTypeRedeemed = redeemTotalPoints[i] || 0;
-            const appTypeExpired = expiredPointsRow[i + 1] || 0;
             const appTypeAdjusted = adjustedPointsRow[i + 1] || 0;
             const appTypeAdminReduction = adminReductionRow[i + 1] || 0;
-            const appTypeNetMovement = appTypeEarned - appTypeRedeemed - appTypeExpired - appTypeAdminReduction + appTypeAdjusted;
+            const appTypeNetMovement = appTypeEarned + appTypeRedeemed + appTypeAdjusted + appTypeAdminReduction;
             netMovementRow.push(appTypeNetMovement);
         }
+        // For total: include global expiration
+        const netMovement = totalEarnTotalPoints + totalRedeemTotalPoints + totalExpiredPoints + totalAdjustedPoints + totalAdminReductionPoints;
         netMovementRow.push(netMovement);
         csvRows.push(netMovementRow.join(","));
+
+        // Add blank row for separation
+        csvRows.push("");
+
+        // Opening Balance Points row (at the end for emphasis)
+        const openingBalancePointsRow = ["Opening Balance Points"];
+        for (const appType of appTypes) {
+            const result = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_date: { $lt: startDate },
+                        status: "completed",
+                        "metadata.requested_by": appType.name,
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
+                },
+            ]);
+            const balance = result[0]?.total || 0;
+            openingBalancePointsRow.push(balance);
+        }
+        openingBalancePointsRow.push(totalOpeningBalance);
+        csvRows.push(openingBalancePointsRow.join(","));
+
+        // Closing Balance Points row (at the end for emphasis)
+        const closingBalancePointsRow = ["Closing Balance Points"];
+        for (const appType of appTypes) {
+            const result = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_date: { $lte: endDate },
+                        status: "completed",
+                        "metadata.requested_by": appType.name,
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
+                },
+            ]);
+            const balance = result[0]?.total || 0;
+            closingBalancePointsRow.push(balance);
+        }
+        closingBalancePointsRow.push(totalClosingBalance);
+        csvRows.push(closingBalancePointsRow.join(","));
 
         // Generate CSV content
         const csvContent = csvRows.join("\n");
