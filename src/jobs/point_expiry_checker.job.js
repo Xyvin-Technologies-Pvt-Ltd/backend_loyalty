@@ -87,7 +87,10 @@ async function processExpiredPoints(jobType = "daily") {
                             transaction_id: `EXP-${originalTransaction.transaction_id}`,
                             status: "completed",
                             note: `Points expired on ${now.toISOString()}`,
-                            reference_id: pointRecord.transaction_id,
+                            reference_id: originalTransaction._id,
+                            metadata: {
+                                requested_by: originalTransaction.metadata?.requested_by || null,
+                            },
                             transaction_date: now,
                         },
                     ],
