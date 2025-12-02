@@ -108,6 +108,7 @@ const getReportData = async (req, res) => {
                 promoPointsResult,
                 adjustedPointsResult,
                 adminReductionResult,
+                expiredPointsResult,
             ] = await Promise.all([
                 // 0. Opening User Count
                 Customer.aggregate([
@@ -377,6 +378,23 @@ const getReportData = async (req, res) => {
                         },
                     },
                 ]),
+                // 8. Total Points Expired (per app type)
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "expire",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            "metadata.requested_by": appTypeName,
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalPoints: { $sum: "$points" },
+                        },
+                    },
+                ]),
             ]);
 
             return {
@@ -400,28 +418,10 @@ const getReportData = async (req, res) => {
                     totalPromoPoints: promoPointsResult[0]?.totalPoints || 0,
                     totalAdjustedPoints: adjustedPointsResult[0]?.totalPoints || 0,
                     adminReductionPoints: adminReductionResult[0]?.totalPoints || 0,
+                    totalExpiredPoints: expiredPointsResult[0]?.totalPoints || 0,
                 },
             };
         };
-
-        // Calculate global expiration (central activity, not app-specific)
-        const expiredPointsResult = await Transaction.aggregate([
-            {
-                $match: {
-                    transaction_type: "expire",
-                    status: "completed",
-                    transaction_date: { $gte: startDate, $lte: endDate },
-                },
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalPoints: { $sum: "$points" },
-                },
-            },
-        ]);
-
-        const totalExpiredPoints = expiredPointsResult[0]?.totalPoints || 0;
 
         // Process all app types in parallel
         const appTypeResults = await Promise.all(appTypes.map(processAppType));
@@ -444,6 +444,7 @@ const getReportData = async (req, res) => {
         let totalPromoPoints = 0;
         let totalAdjustedPoints = 0;
         let totalAdminReductionPoints = 0;
+        let totalExpiredPoints = 0;
         let totalOpeningBalance = 0;
         let totalClosingBalance = 0;
 
@@ -461,6 +462,7 @@ const getReportData = async (req, res) => {
             totalPromoPoints += appTypeData.totalPromoPoints;
             totalAdjustedPoints += appTypeData.totalAdjustedPoints;
             totalAdminReductionPoints += appTypeData.adminReductionPoints;
+            totalExpiredPoints += appTypeData.totalExpiredPoints;
             totalOpeningBalance += appTypeData.openingBalance;
             totalClosingBalance += appTypeData.closingBalance;
         }
@@ -1061,27 +1063,29 @@ const exportReportCSV = async (req, res) => {
         adjustedPointsRow.push(totalAdjustedPoints);
         csvRows.push(adjustedPointsRow.join(","));
 
-        // Total Points Expired row (Global - central activity, not app-specific)
-        const expiredPointsResult = await Transaction.aggregate([
-            {
-                $match: {
-                    transaction_type: "expire",
-                    status: "completed",
-                    transaction_date: { $gte: startDate, $lte: endDate },
+        // Total Points Expired row (per app type)
+        const expiredPointsRow = ["Total Points Expired"];
+        let totalExpiredPoints = 0;
+        for (const appType of appTypes) {
+            const result = await Transaction.aggregate([
+                {
+                    $match: {
+                        transaction_type: "expire",
+                        status: "completed",
+                        transaction_date: { $gte: startDate, $lte: endDate },
+                        "metadata.requested_by": appType.name,
+                    },
                 },
-            },
-            {
-                $group: {
-                    _id: null,
-                    total: { $sum: "$points" },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$points" },
+                    },
                 },
-            },
-        ]);
-        const totalExpiredPoints = expiredPointsResult[0]?.total || 0;
-        const expiredPointsRow = ["Total Points Expired (Global)"];
-        // Add empty cells for each app type column
-        for (let i = 0; i < appTypes.length; i++) {
-            expiredPointsRow.push("");
+            ]);
+            const total = result[0]?.total || 0;
+            expiredPointsRow.push(total);
+            totalExpiredPoints += total;
         }
         expiredPointsRow.push(totalExpiredPoints);
         csvRows.push(expiredPointsRow.join(","));
@@ -1116,17 +1120,18 @@ const exportReportCSV = async (req, res) => {
 
         // Net Movement row
         // Since all points already have correct signs, simply sum all values
-        // For per-app-type: earned + redeemed + adjusted + adminReduction (no expiration since it's global)
+        // For per-app-type: earned + redeemed + adjusted + adminReduction + expired
         const netMovementRow = ["Net Movement"];
         for (let i = 0; i < appTypes.length; i++) {
             const appTypeEarned = earnTotalPoints[i] || 0;
             const appTypeRedeemed = redeemTotalPoints[i] || 0;
             const appTypeAdjusted = adjustedPointsRow[i + 1] || 0;
             const appTypeAdminReduction = adminReductionRow[i + 1] || 0;
-            const appTypeNetMovement = appTypeEarned + appTypeRedeemed + appTypeAdjusted + appTypeAdminReduction;
+            const appTypeExpired = expiredPointsRow[i + 1] || 0;
+            const appTypeNetMovement = appTypeEarned + appTypeRedeemed + appTypeAdjusted + appTypeAdminReduction + appTypeExpired;
             netMovementRow.push(appTypeNetMovement);
         }
-        // For total: include global expiration
+        // For total: include all values
         const netMovement = totalEarnTotalPoints + totalRedeemTotalPoints + totalExpiredPoints + totalAdjustedPoints + totalAdminReductionPoints;
         netMovementRow.push(netMovement);
         csvRows.push(netMovementRow.join(","));
