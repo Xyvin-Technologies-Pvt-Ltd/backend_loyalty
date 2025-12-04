@@ -87,7 +87,10 @@ async function processExpiredPoints(jobType = "daily") {
                             transaction_id: `EXP-${originalTransaction.transaction_id}`,
                             status: "completed",
                             note: `Points expired on ${now.toISOString()}`,
-                            reference_id: pointRecord.transaction_id,
+                            reference_id: originalTransaction._id,
+                            metadata: {
+                                requested_by: originalTransaction.metadata?.requested_by || null,
+                            },
                             transaction_date: now,
                         },
                     ],
@@ -108,6 +111,7 @@ async function processExpiredPoints(jobType = "daily") {
                 logger.info(
                     `Processed expiration for customer ${pointRecord.customer_id}: ${pointRecord.points} points`
                 );
+                
             } catch (error) {
                 // Only abort if transaction wasn't committed
                 if (!transactionCommitted && transaction.hasTransaction) {
