@@ -111,6 +111,7 @@ async function processExpiredPoints(jobType = "daily") {
                 logger.info(
                     `Processed expiration for customer ${pointRecord.customer_id}: ${pointRecord.points} points`
                 );
+                
             } catch (error) {
                 // Only abort if transaction wasn't committed
                 if (!transactionCommitted && transaction.hasTransaction) {
