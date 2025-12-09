@@ -2,6 +2,7 @@ const { logger } = require("../middlewares/logger");
 const moment = require("moment-timezone");
 const { processExpiredPoints } = require("./point_expiry_checker.job");
 const { processTierDowngrades } = require("./tier_downgrade.job");
+const { generateFocus9DailySummary } = require("./focus9_daily_summary.job");
 
 const OMAN_TIMEZONE = "Asia/Muscat";
 const SCHEDULED_HOUR = 2; // 2 AM
@@ -111,12 +112,20 @@ function initializeScheduledJobs() {
       `Point expiry checker scheduled to run daily at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     );
 
+    // Schedule Focus9 daily summary to run daily at 11:59 PM Oman time
+    scheduleDaily(generateFocus9DailySummary, 23, 59, "daily");
+    logger.info(
+      `Focus9 daily summary scheduled to run daily at 23:59 PM Oman time`
+    );
+
+ 
+
     // // Schedule tier downgrade to run on last day of each month at 2 AM Oman time
     // scheduleMonthly(processTierDowngrades, "monthly");
     // logger.info(
     //   `Tier downgrade scheduled to run on last day of each month at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     // );
-    
+
 
     logger.info("All jobs scheduled successfully");
   } catch (error) {
