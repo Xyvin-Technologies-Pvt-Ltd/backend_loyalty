@@ -70,6 +70,21 @@ async function processExpiredPoints(jobType = "daily") {
                     );
                 }
 
+                // Get customer's current points before expiration
+                const customer = await Customer.findById(
+                    pointRecord.customer_id
+                ).session(session);
+
+                if (!customer) {
+                    throw new Error(
+                        `Customer not found: ${pointRecord.customer_id}`
+                    );
+                }
+
+                const previousPoints = customer.total_points;
+                const pointsAfterExpiration = previousPoints - pointRecord.points;
+                const totalPointsExpired = pointRecord.points;
+
                 // Mark points as expired
                 await LoyaltyPoints.findByIdAndUpdate(
                     pointRecord._id,
@@ -90,6 +105,12 @@ async function processExpiredPoints(jobType = "daily") {
                             reference_id: originalTransaction._id,
                             metadata: {
                                 requested_by: originalTransaction.metadata?.requested_by || null,
+                                previous_points: previousPoints,
+                                points_after_expiration: pointsAfterExpiration,
+                                total_points_expired: totalPointsExpired,
+                                expiration_processed_at: now,
+                                original_transaction_date: originalTransaction.transaction_date,
+                                loyalty_points_id: pointRecord._id,
                             },
                             transaction_date: now,
                         },
@@ -111,7 +132,7 @@ async function processExpiredPoints(jobType = "daily") {
                 logger.info(
                     `Processed expiration for customer ${pointRecord.customer_id}: ${pointRecord.points} points`
                 );
-                
+
             } catch (error) {
                 // Only abort if transaction wasn't committed
                 if (!transactionCommitted && transaction.hasTransaction) {

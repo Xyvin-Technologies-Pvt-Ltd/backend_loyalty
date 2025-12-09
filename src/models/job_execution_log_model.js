@@ -6,7 +6,7 @@ const jobExecutionLogSchema = new mongoose.Schema(
     jobName: {
       type: String,
       required: true,
-      enum: ["point_expiry_checker", "tier_downgrade"],
+      enum: ["point_expiry_checker", "tier_downgrade","focus9_daily_summary"],
       index: true,
     },
     jobType: {
