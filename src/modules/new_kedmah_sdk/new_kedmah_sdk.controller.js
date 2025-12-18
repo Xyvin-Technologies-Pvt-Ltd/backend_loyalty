@@ -22,7 +22,6 @@ const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
     // Get all valid (non-expired) loyalty points sorted by expiry date (oldest first)
     const validPoints = await LoyaltyPoints.find({
       customer_id,
-      expiryDate: { $gte: new Date() },
       status: "active",
     })
       .sort({ earnedAt: 1 }) // Oldest points first (FIFO)

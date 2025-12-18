@@ -1,10 +1,10 @@
 const { logger } = require("../middlewares/logger");
 const Customer = require("../models/customer_model");
-const LoyaltyPoints = require("../models/loyalty_points_model");
 const Transaction = require("../models/transaction_model");
 const Tier = require("../models/tier_model");
 const TierEligibilityCriteria = require("../models/tier_eligibility_criteria_model");
 const PriorityCustomer = require("../models/priority_customer_model");
+const JobExecutionLog = require("../models/job_execution_log_model");
 const { SafeTransaction } = require("../helpers/transaction");
 
 /**
@@ -24,8 +24,7 @@ const checkTierRetentionEligibility = async (customer, tier, session) => {
 
     if (!criteria) {
       logger.warn(
-        `No tier eligibility criteria found for tier ${
-          tier.name?.en || tier.name
+        `No tier eligibility criteria found for tier ${tier.name?.en || tier.name
         }`
       );
       // If no criteria defined, use basic point threshold only
@@ -61,7 +60,7 @@ const checkTierRetentionEligibility = async (customer, tier, session) => {
         const periodEndDate = new Date(now);
         periodEndDate.setDate(
           periodEndDate.getDate() -
-            periodIndex * criteria.evaluation_period_days
+          periodIndex * criteria.evaluation_period_days
         );
 
         const periodStartDate = new Date(periodEndDate);
@@ -104,10 +103,8 @@ const checkTierRetentionEligibility = async (customer, tier, session) => {
         } else {
           // Break the consecutive chain - customer fails retention
           logger.info(
-            `Customer ${
-              customer._id
-            } failed tier retention - insufficient earnings in period ${
-              periodIndex + 1
+            `Customer ${customer._id
+            } failed tier retention - insufficient earnings in period ${periodIndex + 1
             }`,
             {
               tier: tier.name?.en || tier.name,
@@ -142,8 +139,7 @@ const checkTierRetentionEligibility = async (customer, tier, session) => {
 
     // Customer has sufficient points for their tier
     logger.debug(
-      `Customer ${customer._id} has sufficient points for tier ${
-        tier.name?.en || tier.name
+      `Customer ${customer._id} has sufficient points for tier ${tier.name?.en || tier.name
       } (${customer.total_points} >= ${tier.points_required})`
     );
     return true; // Customer retains tier
@@ -161,78 +157,39 @@ const checkTierRetentionEligibility = async (customer, tier, session) => {
 };
 
 /**
- * Process expired points and handle tier downgrades
- * Runs at midnight on the first day of each month
+ * Process tier downgrades based on retention eligibility criteria
+ * Runs on the last day of each month at 2 AM Oman time
  */
-async function processPointsAndTiers() {
+async function processTierDowngrades(jobType = "monthly") {
+  const startedAt = new Date();
+  let executionLog = null;
   const transaction = new SafeTransaction();
 
   try {
+    // Create execution log entry
+    executionLog = await JobExecutionLog.create({
+      jobName: "tier_downgrade",
+      jobType: jobType,
+      startedAt: startedAt,
+      status: "running",
+      metrics: {
+        totalRecords: 0,
+        processedRecords: 0,
+        successfulRecords: 0,
+        failedRecords: 0,
+      },
+    });
+
     await transaction.start();
     const session = transaction.session;
 
-    logger.info(
-      "Starting monthly points expiration and tier downgrade process"
-    );
+    logger.info("Starting monthly tier downgrade process", {
+      executionLogId: executionLog._id,
+    });
 
-    // 1. Find all expired points (status: active and expiryDate < now)
     const now = new Date();
-    const expiredPoints = await LoyaltyPoints.find({
-      status: "active",
-      expiryDate: { $lt: now },
-    }).session(session);
 
-    logger.info(`Found ${expiredPoints.length} expired point records`);
-
-    // Process each expired points record
-    for (const pointRecord of expiredPoints) {
-      try {
-        // Mark points as expired
-        await LoyaltyPoints.findByIdAndUpdate(
-          pointRecord._id,
-          { status: "expired" },
-          { session }
-        );
-
-        // Create expiration transaction
-        await Transaction.create(
-          [
-            {
-              customer_id: pointRecord.customer_id,
-              transaction_type: "expire",
-              points: -pointRecord.points,
-              transaction_id: `EXP-${Date.now()}-${pointRecord.customer_id}`,
-              status: "completed",
-              note: `Points expired on ${now.toISOString()}`,
-              reference_id: pointRecord.transaction_id,
-              transaction_date: now,
-            },
-          ],
-          { session }
-        );
-        console.log("expiry transaction created", Transaction);
-
-        // Update customer's total points
-        await Customer.findByIdAndUpdate(
-          pointRecord.customer_id,
-          { $inc: { total_points: -pointRecord.points } },
-          { session }
-        );
-
-        logger.info(
-          `Processed expiration for customer ${pointRecord.customer_id}: ${pointRecord.points} points`
-        );
-      } catch (error) {
-        logger.error(
-          `Error processing expired points for record ${pointRecord._id}:`,
-          error
-        );
-        // Continue with next record
-        continue;
-      }
-    }
-
-    // 2. Process tier downgrades using dynamic eligibility criteria
+    // Process tier downgrades using dynamic eligibility criteria
     // Get all tiers ordered by hierarchy_level (highest to lowest)
     const tiers = await Tier.find({})
       .sort({ hierarchy_level: -1 })
@@ -255,6 +212,16 @@ async function processPointsAndTiers() {
     logger.info(
       `Processing tier downgrades for ${customersToCheck.length} customers in elevated tiers`
     );
+
+    // Update total records in log
+    executionLog.metrics.totalRecords = customersToCheck.length;
+    await executionLog.save();
+
+    let successCount = 0;
+    let errorCount = 0;
+    let downgradeCount = 0;
+    const downgrades = [];
+    const errors = [];
 
     for (const customer of customersToCheck) {
       try {
@@ -394,10 +361,17 @@ async function processPointsAndTiers() {
               { session }
             );
 
+            downgradeCount++;
+            downgrades.push({
+              customerId: customer._id.toString(),
+              fromTier: currentTier.name?.en || currentTier.name,
+              toTier: newTier.name?.en || newTier.name,
+              totalPoints: customer.total_points,
+            });
+
             // Log the downgrade with details
             logger.info(
-              `Downgraded customer ${customer._id} from ${
-                currentTier.name?.en || currentTier.name
+              `Downgraded customer ${customer._id} from ${currentTier.name?.en || currentTier.name
               } to ${newTier.name?.en || newTier.name}`,
               {
                 customerId: customer._id,
@@ -419,11 +393,9 @@ async function processPointsAndTiers() {
                   points: 0,
                   transaction_id: `TIER-DOWN-${Date.now()}-${customer._id}`,
                   status: "completed",
-                  note: `Tier downgraded from ${
-                    currentTier.name?.en || currentTier.name
-                  } to ${
-                    newTier.name?.en || newTier.name
-                  } due to insufficient activity`,
+                  note: `Tier downgraded from ${currentTier.name?.en || currentTier.name
+                    } to ${newTier.name?.en || newTier.name
+                    } due to insufficient activity`,
                   metadata: {
                     previous_tier: currentTier.name?.en || currentTier.name,
                     new_tier: newTier.name?.en || newTier.name,
@@ -442,8 +414,7 @@ async function processPointsAndTiers() {
             );
           } else {
             logger.info(
-              `Customer ${customer._id} retains ${
-                currentTier.name?.en || currentTier.name
+              `Customer ${customer._id} retains ${currentTier.name?.en || currentTier.name
               } tier (no lower eligible tier found)`,
               {
                 customerId: customer._id,
@@ -457,8 +428,7 @@ async function processPointsAndTiers() {
           }
         } else {
           logger.debug(
-            `Customer ${customer._id} retains ${
-              currentTier.name?.en || currentTier.name
+            `Customer ${customer._id} retains ${currentTier.name?.en || currentTier.name
             } tier (meets retention criteria)`,
             {
               customerId: customer._id,
@@ -467,7 +437,14 @@ async function processPointsAndTiers() {
             }
           );
         }
+        successCount++;
       } catch (error) {
+        errorCount++;
+        errors.push({
+          customerId: customer._id.toString(),
+          message: error.message,
+        });
+
         logger.error(
           `Error processing tier downgrade for customer ${customer._id}:`,
           error
@@ -478,20 +455,70 @@ async function processPointsAndTiers() {
     }
 
     await transaction.commit();
-    logger.info(
-      "Successfully completed monthly points expiration and tier downgrade process"
-    );
+
+    // Determine final status
+    let finalStatus = "completed";
+    if (errorCount > 0 && successCount > 0) {
+      finalStatus = "partial";
+    } else if (errorCount > 0 && successCount === 0) {
+      finalStatus = "failed";
+    }
+
+    const completedAt = new Date();
+    const duration = completedAt - startedAt;
+
+    // Update execution log with results
+    executionLog.status = finalStatus;
+    executionLog.completedAt = completedAt;
+    executionLog.duration = duration;
+    executionLog.metrics.processedRecords = customersToCheck.length;
+    executionLog.metrics.successfulRecords = successCount;
+    executionLog.metrics.failedRecords = errorCount;
+    executionLog.details = {
+      downgrades: downgrades.slice(0, 50), // Store first 50 downgrades
+      totalDowngrades: downgradeCount,
+      errors: errors.slice(0, 10), // Store first 10 errors
+      totalErrors: errors.length,
+    };
+
+    await executionLog.save();
+
+    logger.info("Successfully completed monthly tier downgrade process", {
+      executionLogId: executionLog._id,
+      duration: `${duration}ms`,
+      downgrades: downgradeCount,
+      successful: successCount,
+      failed: errorCount,
+    });
   } catch (error) {
+    // Handle unexpected errors
+    const completedAt = new Date();
+    const duration = completedAt - startedAt;
+
+    if (executionLog) {
+      executionLog.status = "failed";
+      executionLog.completedAt = completedAt;
+      executionLog.duration = duration;
+      executionLog.error = {
+        message: error.message,
+        stack: error.stack,
+        code: error.code || "UNKNOWN_ERROR",
+      };
+      await executionLog.save();
+    }
+
     await transaction.abort();
-    logger.error(
-      "Error in monthly points expiration and tier downgrade process:",
-      error
-    );
+    logger.error("Error in monthly tier downgrade process:", {
+      error: error.message,
+      stack: error.stack,
+      executionLogId: executionLog?._id,
+    });
+    throw error;
   } finally {
     await transaction.end();
   }
 }
 
 module.exports = {
-  processPointsAndTiers,
+  processTierDowngrades,
 };
