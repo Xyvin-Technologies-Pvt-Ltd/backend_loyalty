@@ -266,9 +266,8 @@ async function processTierDowngrades(jobType = "monthly") {
                 points: 0,
                 transaction_id: `TIER-PROTECT-${Date.now()}-${customer._id}`,
                 status: "completed",
-                note: `Priority protection enforced: upgraded to ${
-                  priorityTier.name?.en || priorityTier.name
-                } minimum tier`,
+                note: `Priority protection enforced: upgraded to ${priorityTier.name?.en || priorityTier.name
+                  } minimum tier`,
                 metadata: {
                   previous_tier: currentTier.name?.en || currentTier.name,
                   enforced_minimum_tier:
@@ -343,8 +342,7 @@ async function processTierDowngrades(jobType = "monthly") {
           if (newTier.hierarchy_level < currentTier.hierarchy_level) {
             if (newTier._id.toString() === currentTier._id.toString()) {
               logger.info(
-                `Customer ${customer._id} retains ${
-                  currentTier.name?.en || currentTier.name
+                `Customer ${customer._id} retains ${currentTier.name?.en || currentTier.name
                 } tier due to priority protection`,
                 {
                   customerId: customer._id,
