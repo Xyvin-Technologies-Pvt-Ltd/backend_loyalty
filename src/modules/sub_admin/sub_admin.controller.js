@@ -110,20 +110,24 @@ const updateSubAdmin = async (req, res) => {
       return response_handler(res, 404, "Sub-admin not found");
     }
 
-    // Update fields
-    if (name) subAdmin.name = name;
-    if (email) subAdmin.email = email;
-    if (phoneNumber) subAdmin.phoneNumber = phoneNumber;
-    if (roleId) subAdmin.role = roleId;
+    // Update fields - allow empty strings to clear fields
+    if (name !== undefined) subAdmin.name = name;
+    if (email !== undefined) subAdmin.email = email;
+    if (phoneNumber !== undefined) subAdmin.phoneNumber = phoneNumber;
+    if (roleId !== undefined && roleId !== null && roleId !== "") {
+      subAdmin.role = roleId;
+    }
     if (typeof isActive === "boolean") subAdmin.isActive = isActive;
 
-    await subAdmin.save();
+    // Save with validation but skip password validation if not modified
+    await subAdmin.save({ validateBeforeSave: true });
     await subAdmin.logActivity("UPDATE", "Sub-admin details updated");
 
-    return response_handler(res, 200, "Sub-admin updated successfully");
+    return response_handler(res, 200, "Sub-admin updated successfully", subAdmin);
   } catch (error) {
     console.error("Error updating sub-admin:", error);
-    return response_handler(res, 500, "Error updating sub-admin");
+    const errorMessage = error.message || "Error updating sub-admin";
+    return response_handler(res, 500, errorMessage);
   }
 };
 

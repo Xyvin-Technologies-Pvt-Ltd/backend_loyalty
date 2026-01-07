@@ -22,7 +22,7 @@ const reportsTimeout = (req, res, next) => {
 // Get report data
 router.get(
   "/data",
-  authorizePermission("VIEW_AUDIT_LOGS"),
+  authorizePermission("VIEW_REPORTS"),
   reportsTimeout,
   cacheMiddleware(60, cacheKeys.allReports),
   getReportData
@@ -31,7 +31,7 @@ router.get(
 // Export report as CSV
 router.get(
   "/export-csv",
-  authorizePermission("VIEW_AUDIT_LOGS"),
+  authorizePermission("VIEW_REPORTS"),
   exportReportCSV
 );
 
