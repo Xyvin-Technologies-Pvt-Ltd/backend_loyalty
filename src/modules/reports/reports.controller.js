@@ -498,6 +498,7 @@ const formatTransactionRow = (transaction, expiryDate) => {
 
 /**
  * Get transaction count for export estimation
+ * If count exceeds limit, finds the 100k transaction's creation date and calculates safe end date
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
@@ -526,10 +527,53 @@ const getTransactionExportCount = async (req, res) => {
             transaction_date: { $gte: startDate, $lte: endDate },
         });
 
+        const exceedsLimit = count > MAX_EXPORT_ROWS;
+        let suggestedEndDate = null;
+        let safeEndDate = null;
+
+        // If count exceeds limit, find the 100k transaction's createdAt date
+        if (exceedsLimit) {
+            try {
+                // Find the 100,000th transaction ordered by createdAt (ascending)
+                const hundredThousandthTransaction = await Transaction.findOne(
+                    {
+                        transaction_date: { $gte: startDate, $lte: endDate },
+                    },
+                    { createdAt: 1 },
+                    {
+                        sort: { createdAt: 1 },
+                        skip: MAX_EXPORT_ROWS - 1, // Skip to the 100,000th transaction (0-indexed)
+                    }
+                ).lean();
+
+                if (hundredThousandthTransaction && hundredThousandthTransaction.createdAt) {
+                    const hundredKDate = new Date(hundredThousandthTransaction.createdAt);
+                    
+                    // Calculate safe end date: 100k transaction's createdAt date - 1 day
+                    // This ensures we get complete date ranges (full days)
+                    safeEndDate = new Date(hundredKDate);
+                    safeEndDate.setDate(safeEndDate.getDate() - 1);
+                    safeEndDate.setHours(23, 59, 59, 999);
+
+                    // Only suggest if safe end date is different from original end date
+                    // and is after or equal to start date
+                    if (safeEndDate >= startDate && safeEndDate < endDate) {
+                        suggestedEndDate = safeEndDate.toISOString();
+                    }
+                }
+            } catch (findError) {
+                logger.error(`Error finding 100k transaction: ${findError.message}`, {
+                    stack: findError.stack,
+                });
+                // Continue without suggested date if there's an error
+            }
+        }
+
         return response_handler(res, 200, "Transaction count retrieved successfully", {
             count,
             maxExportRows: MAX_EXPORT_ROWS,
-            exceedsLimit: count > MAX_EXPORT_ROWS,
+            exceedsLimit,
+            suggestedEndDate, // ISO string of safe end date (100k transaction date - 1 day)
             dateRange: {
                 startDate: startDate.toISOString(),
                 endDate: endDate.toISOString(),
