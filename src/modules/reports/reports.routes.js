@@ -1,16 +1,21 @@
 const express = require("express");
 const router = express.Router();
-const { getReportData, exportReportCSV } = require("./reports.controller");
+const { 
+  getReportData, 
+  exportReportCSV, 
+  exportTransactionReport,
+  getTransactionExportCount 
+} = require("./reports.controller");
 const { authorizePermission } = require("../../middlewares/auth/auth");
 const {
   cacheMiddleware,
   cacheKeys,
 } = require("../../middlewares/redis_cache/cache.middleware");
 
-// Middleware to increase timeout for reports endpoint (120 seconds)
+// Middleware to increase timeout for reports endpoint (no timeout - infinite)
 const reportsTimeout = (req, res, next) => {
-  req.setTimeout(120000); // 120 seconds
-  res.setTimeout(120000);
+  req.setTimeout(0); // 0 means no timeout - infinite
+  res.setTimeout(0);
   next();
 };
 
@@ -28,6 +33,21 @@ router.get(
   "/export-csv",
   authorizePermission("VIEW_AUDIT_LOGS"),
   exportReportCSV
+);
+
+// Get transaction count before export (for UI estimation)
+router.get(
+  "/transaction-export/count",
+  authorizePermission("VIEW_REPORTS"),
+  getTransactionExportCount
+);
+
+// Export transaction report as CSV (streaming)
+router.get(
+  "/transaction-export",
+  authorizePermission("VIEW_REPORTS"),
+  reportsTimeout,
+  exportTransactionReport
 );
 
 module.exports = router;

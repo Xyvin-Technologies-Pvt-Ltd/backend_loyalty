@@ -437,10 +437,356 @@ const exportReportCSV = async (req, res) => {
     }
 };
 
+// CSV export configuration
+const EXPORT_BATCH_SIZE = 500; // Process transactions in batches
+const MAX_EXPORT_ROWS = 100000; // Maximum rows for single export (safety limit)
 
+/**
+ * Helper function to format date as dd mm yyyy
+ */
+const formatDate = (date) => {
+    if (!date) return "";
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day} ${month} ${year}`;
+};
+
+/**
+ * Helper function to escape CSV values
+ */
+const escapeCSVValue = (value) => {
+    const stringValue = String(value);
+    if (stringValue.includes(",") || stringValue.includes('"') || stringValue.includes("\n")) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+};
+
+/**
+ * Helper function to format a transaction row for CSV
+ */
+const formatTransactionRow = (transaction, expiryDate) => {
+    // Extract criteria codes from metadata.items array
+    let criteriaCodes = "";
+    if (transaction.metadata?.items && Array.isArray(transaction.metadata.items)) {
+        criteriaCodes = transaction.metadata.items
+            .map(item => item.criteria_code)
+            .filter(code => code)
+            .join(", ");
+    }
+
+    const row = [
+        transaction.customer_data?.customer_id || "",
+        transaction._id.toString(),
+        transaction.transaction_id || "",
+        transaction.metadata?.original_transaction_id || "",
+        transaction.transaction_type || "",
+        transaction.points || 0,
+        criteriaCodes,
+        transaction.metadata?.requested_by || "",
+        formatDate(transaction.transaction_date),
+        formatDate(transaction.createdAt),
+        formatDate(expiryDate),
+        transaction.status || "",
+    ];
+
+    return row.map(escapeCSVValue).join(",");
+};
+
+/**
+ * Get transaction count for export estimation
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const getTransactionExportCount = async (req, res) => {
+    try {
+        let { startDate, endDate } = req.query;
+
+        // Set default to current month if not provided
+        const now = new Date();
+        if (!startDate) {
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else {
+            startDate = new Date(startDate);
+        }
+
+        if (!endDate) {
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        } else {
+            endDate = new Date(endDate);
+            endDate.setHours(23, 59, 59, 999);
+        }
+
+        startDate.setHours(0, 0, 0, 0);
+
+        const count = await Transaction.countDocuments({
+            transaction_date: { $gte: startDate, $lte: endDate },
+        });
+
+        return response_handler(res, 200, "Transaction count retrieved successfully", {
+            count,
+            maxExportRows: MAX_EXPORT_ROWS,
+            exceedsLimit: count > MAX_EXPORT_ROWS,
+            dateRange: {
+                startDate: startDate.toISOString(),
+                endDate: endDate.toISOString(),
+            },
+        });
+    } catch (error) {
+        logger.error(`Error getting transaction count: ${error.message}`, {
+            stack: error.stack,
+        });
+        return response_handler(res, 500, "Failed to get transaction count", error.message);
+    }
+};
+
+/**
+ * Export transaction report as CSV using streaming for large datasets
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const exportTransactionReport = async (req, res) => {
+    try {
+        let { startDate, endDate, limit } = req.query;
+
+        // Set default to current month if not provided
+        const now = new Date();
+        if (!startDate) {
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else {
+            startDate = new Date(startDate);
+        }
+
+        if (!endDate) {
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        } else {
+            endDate = new Date(endDate);
+            endDate.setHours(23, 59, 59, 999);
+        }
+
+        // Set start date to 00:00:00
+        startDate.setHours(0, 0, 0, 0);
+
+        // Parse and validate limit
+        const exportLimit = limit ? Math.min(parseInt(limit, 10), MAX_EXPORT_ROWS) : MAX_EXPORT_ROWS;
+
+        const LoyaltyPoints = require("../../models/loyalty_points_model");
+
+        // CSV headers
+        const headers = [
+            "kedmah_customer_id",
+            "loyalty_transaction_id",
+            "khedmah_transaction_id",
+            "cancel_transaction_id",
+            "transaction_type",
+            "point",
+            "criteria_code",
+            "requested_by",
+            "transaction_date",
+            "created_date",
+            "expirydate",
+            "status",
+        ];
+
+        // Set response headers for CSV download (streaming)
+        res.setHeader("Content-Type", "text/csv;charset=utf-8");
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename=transaction_report_${startDate.toISOString().split("T")[0]}_${endDate.toISOString().split("T")[0]}.csv`
+        );
+        res.setHeader("Transfer-Encoding", "chunked");
+
+        // Write CSV headers
+        res.write(headers.join(",") + "\n");
+
+        // Build aggregation pipeline
+        const pipeline = [
+            {
+                $match: {
+                    transaction_date: { $gte: startDate, $lte: endDate },
+                },
+            },
+            {
+                $lookup: {
+                    from: "customers",
+                    localField: "customer_id",
+                    foreignField: "_id",
+                    as: "customer_data",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$customer_data",
+                    preserveNullAndEmptyArrays: true,
+                },
+            },
+            {
+                $project: {
+                    _id: 1,
+                    transaction_id: 1,
+                    transaction_type: 1,
+                    points: 1,
+                    status: 1,
+                    transaction_date: 1,
+                    createdAt: 1,
+                    metadata: 1,
+                    "customer_data.customer_id": 1,
+                },
+            },
+            {
+                $sort: { transaction_date: 1 },
+            },
+            {
+                $limit: exportLimit,
+            },
+        ];
+
+        // Use cursor for streaming with batched processing
+        const cursor = Transaction.aggregate(pipeline)
+            .allowDiskUse(true)
+            .cursor({ batchSize: EXPORT_BATCH_SIZE });
+
+        let processedCount = 0;
+        let batch = [];
+        let expiryMap = {};
+
+        logger.info(`Starting transaction export stream`, {
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+            limit: exportLimit,
+        });
+
+        // Process transactions using cursor streaming
+        for await (const transaction of cursor) {
+            batch.push(transaction);
+
+            // Process batch when it reaches EXPORT_BATCH_SIZE
+            if (batch.length >= EXPORT_BATCH_SIZE) {
+                // Fetch expiry dates for this batch
+                const batchIds = batch
+                    .map((t) => {
+                        if (!t._id) return null;
+                        if (t._id instanceof mongoose.Types.ObjectId) {
+                            return t._id;
+                        }
+                        if (mongoose.Types.ObjectId.isValid(t._id)) {
+                            return new mongoose.Types.ObjectId(t._id);
+                        }
+                        return null;
+                    })
+                    .filter((id) => id !== null);
+
+                if (batchIds.length > 0) {
+                    const loyaltyPoints = await LoyaltyPoints.find(
+                        { transaction_id: { $in: batchIds } },
+                        { transaction_id: 1, expiryDate: 1 }
+                    ).lean();
+
+                    loyaltyPoints.forEach((lp) => {
+                        expiryMap[lp.transaction_id.toString()] = lp.expiryDate;
+                    });
+                }
+
+                // Write batch to response
+                for (const txn of batch) {
+                    try {
+                        const expiryDate = expiryMap[txn._id.toString()];
+                        const row = formatTransactionRow(txn, expiryDate);
+                        res.write(row + "\n");
+                        processedCount++;
+                    } catch (rowError) {
+                        logger.error(`Error processing transaction row: ${rowError.message}`, {
+                            transactionId: txn._id,
+                        });
+                    }
+                }
+
+                // Clear batch and expiry map for next batch
+                batch = [];
+                expiryMap = {};
+
+                // Log progress every 5000 rows
+                if (processedCount % 5000 === 0) {
+                    logger.info(`Export progress: ${processedCount} transactions processed`);
+                }
+            }
+        }
+
+        // Process remaining transactions in the last batch
+        if (batch.length > 0) {
+            const batchIds = batch
+                .map((t) => {
+                    if (!t._id) return null;
+                    if (t._id instanceof mongoose.Types.ObjectId) {
+                        return t._id;
+                    }
+                    if (mongoose.Types.ObjectId.isValid(t._id)) {
+                        return new mongoose.Types.ObjectId(t._id);
+                    }
+                    return null;
+                })
+                .filter((id) => id !== null);
+
+            if (batchIds.length > 0) {
+                const loyaltyPoints = await LoyaltyPoints.find(
+                    { transaction_id: { $in: batchIds } },
+                    { transaction_id: 1, expiryDate: 1 }
+                ).lean();
+
+                loyaltyPoints.forEach((lp) => {
+                    expiryMap[lp.transaction_id.toString()] = lp.expiryDate;
+                });
+            }
+
+            for (const txn of batch) {
+                try {
+                    const expiryDate = expiryMap[txn._id.toString()];
+                    const row = formatTransactionRow(txn, expiryDate);
+                    res.write(row + "\n");
+                    processedCount++;
+                } catch (rowError) {
+                    logger.error(`Error processing transaction row: ${rowError.message}`, {
+                        transactionId: txn._id,
+                    });
+                }
+            }
+        }
+
+        logger.info(`Transaction export completed: ${processedCount} rows exported`, {
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+        });
+
+        // End the response
+        res.end();
+    } catch (error) {
+        logger.error(`Error exporting transaction report: ${error.message}`, {
+            stack: error.stack,
+            error: error,
+        });
+
+        // If response headers already sent, try to end gracefully
+        if (res.headersSent) {
+            res.write(`\n# ERROR: Export failed - ${error.message}\n`);
+            return res.end();
+        }
+
+        return response_handler(
+            res,
+            500,
+            "Failed to export transaction report",
+            error.message
+        );
+    }
+};
 
 module.exports = {
     getReportData,
     exportReportCSV,
+    exportTransactionReport,
+    getTransactionExportCount,
 };
 
