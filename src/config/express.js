@@ -53,6 +53,7 @@ function initializeExpress() {
         "http://uat-loyalty.xyvin.com",
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://141.105.172.45:7733",
         "http://141.105.172.45:3737",
         "http://api-uat-loyalty.xyvin.com",
