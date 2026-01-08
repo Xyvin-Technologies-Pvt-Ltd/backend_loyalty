@@ -412,7 +412,7 @@ const generateReportData = async (startDate, endDate, onProgress = () => { }) =>
       Transaction.aggregate([
         {
           $match: {
-            transaction_type: "redeem",
+            transaction_type: "adjust",
             status: "completed",
             transaction_date: { $gte: startDate, $lte: endDate },
             transaction_id: { $regex: /^ADMIN-/ },

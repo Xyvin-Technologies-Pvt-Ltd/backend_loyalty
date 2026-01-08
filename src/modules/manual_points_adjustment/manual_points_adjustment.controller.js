@@ -605,7 +605,7 @@ const reducePoints = async (req, res) => {
       [
         {
           customer_id: customer._id,
-          transaction_type: "redeem",
+          transaction_type: "adjust",
           points: -numericPoints,
           transaction_id: `ADMIN-$${uuidv4().slice(0, 7)}`,
           status: "completed",
