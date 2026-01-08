@@ -1,4 +1,4 @@
-name: PROD Loyalty Backend
+name: PROD Loyalty Backends
 
 on:
   push:
