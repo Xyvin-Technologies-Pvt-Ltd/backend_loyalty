@@ -14,7 +14,8 @@ const PERMISSION = "MANAGE_PRIORITY_CUSTOMERS";
 const SUPER_ADMIN_NAME = "Super Admin";
 
 const run = async () => {
-    await mongoose.connect(process.env.MONGODB_URI);
+    const uri = process.env.MONGO_URL || process.env.MONGODB_URI;
+    await mongoose.connect(uri);
 
     const superAdmin = await Role.findOne({ name: SUPER_ADMIN_NAME });
 
