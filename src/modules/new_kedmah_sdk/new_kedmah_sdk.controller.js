@@ -17,6 +17,18 @@ const CouponBrand = require("../../models/coupon_brand_model");
 const CouponCategory = require("../../models/coupon_category_model");
 const moment = require("moment-timezone");
 
+// Legacy image CDN that older documents were saved with. Keep this constant in
+// one place so it can be swapped for the current host in a single line.
+const LEGACY_IMAGE_HOST = "http://api-uat-loyalty.xyvin.com/";
+
+// Resolved once. Prefer the KHEDMAH_IMAGE_BASE_URL env var; fall back to the
+// historical UAT value so existing deployments keep working before the env is set.
+const KHEDMAH_IMAGE_BASE_URL =
+  process.env.KHEDMAH_IMAGE_BASE_URL || "http://141.105.172.45:7733/api/";
+
+const rewriteKhedmahImageUrl = (url) =>
+  typeof url === "string" ? url.replace(LEGACY_IMAGE_HOST, KHEDMAH_IMAGE_BASE_URL) : url;
+
 const redeemPointsFIFO = async (customer_id, pointsToRedeem, session) => {
   try {
     // Get all valid (non-expired) loyalty points sorted by expiry date (oldest first)
@@ -1462,16 +1474,10 @@ const getMerchantOffers = async (req, res) => {
     // Replace URLs
     allCoupons.forEach((coupon) => {
       if (coupon.posterImage) {
-        coupon.posterImage = coupon.posterImage.replace(
-          "http://api-uat-loyalty.xyvin.com/",
-          "http://141.105.172.45:7733/api/"
-        );
+        coupon.posterImage = rewriteKhedmahImageUrl(coupon.posterImage);
       }
       if (coupon.merchantId?.image) {
-        coupon.merchantId.image = coupon.merchantId.image.replace(
-          "http://api-uat-loyalty.xyvin.com/",
-          "http://141.105.172.45:7733/api/"
-        );
+        coupon.merchantId.image = rewriteKhedmahImageUrl(coupon.merchantId.image);
       }
     });
 
@@ -1523,10 +1529,7 @@ const getCouponBrands = async (req, res) => {
 
     couponBrands.forEach((brand) => {
       if (brand.image) {
-        brand.image = brand.image.replace(
-          "http://api-uat-loyalty.xyvin.com/",
-          "http://141.105.172.45:7733/api/"
-        );
+        brand.image = rewriteKhedmahImageUrl(brand.image);
       }
     });
 
@@ -1565,10 +1568,7 @@ const getAllCategories = async (req, res) => {
 
     couponCategories.forEach((category) => {
       if (category.image) {
-        category.image = category.image.replace(
-          "http://api-uat-loyalty.xyvin.com/",
-          "http://141.105.172.45:7733/api/"
-        );
+        category.image = rewriteKhedmahImageUrl(category.image);
       }
     });
 
@@ -1597,15 +1597,9 @@ const getCouponDetails = async (req, res) => {
     const { customer_id } = req.query;
     const customer = await Customer.findOne({ customer_id });
     const coupon = await CouponCode.findById(couponId).populate("merchantId couponCategoryId").lean();
-    coupon.posterImage = coupon.posterImage.replace(
-      "http://api-uat-loyalty.xyvin.com/",
-      "http://141.105.172.45:7733/api/"
-    );
+    coupon.posterImage = rewriteKhedmahImageUrl(coupon.posterImage);
     if (coupon?.merchantId?.image) {
-      coupon.merchantId.image = coupon.merchantId.image.replace(
-        "http://api-uat-loyalty.xyvin.com/",
-        "http://141.105.172.45:7733/api/"
-      );
+      coupon.merchantId.image = rewriteKhedmahImageUrl(coupon.merchantId.image);
     }
 
     console.log('tiers', coupon.eligibilityCriteria.tiers);

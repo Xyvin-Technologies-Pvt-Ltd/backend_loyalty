@@ -252,13 +252,13 @@ function handleSuccessfulUpload(req, res, fieldUsed) {
   }
 
   // File uploaded successfully
-  //find server adddress and add server address to the url
-  let serverAddress = ''
-  if(process.env.IMAGE_SERVER_ENV === 'UAT'){
-    serverAddress = 'http://141.105.172.45:7733'
-  }else {
-    serverAddress = 'https://khedmahloyalty.oifcoman.com:3737'
-  }
+  // Resolve the public host for uploaded assets. Prefer an explicit env var so each
+  // environment controls its own host without code changes.
+  const serverAddress =
+    process.env.IMAGE_SERVER_URL ||
+    (process.env.IMAGE_SERVER_ENV === "UAT"
+      ? "http://141.105.172.45:7733"
+      : "https://khedmahloyalty.oifcoman.com:3737");
 
   const fileUrl = serverAddress + `/uploads/${req.file.filename}`;
   console.log(fileUrl);

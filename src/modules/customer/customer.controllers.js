@@ -258,13 +258,26 @@ const exportCustomersToExcel = async (req, res) => {
       }
     }
 
-    // Build sort object
-    const sort = {};
-    sort[sort_by] = sort_order === "asc" ? 1 : -1;
+    // Build sort object. Whitelist sort_by to avoid unindexed sorts on arbitrary fields,
+    // which is what blows past Mongo's 100MB in-memory sort limit on large collections.
+    const allowedSortFields = [
+      "createdAt",
+      "name",
+      "total_points",
+      "customer_id",
+    ];
+    const safeSortBy = allowedSortFields.includes(sort_by)
+      ? sort_by
+      : "createdAt";
+    const sort = { [safeSortBy]: sort_order === "asc" ? 1 : -1 };
 
-    // Fetch all customers matching filters (no pagination)
+    // Fetch all customers matching filters (no pagination).
+    // $sort runs before $lookup so Mongo can use the { createdAt, app_type } index
+    // and so the sort operates on small documents (not post-lookup arrays).
+    // allowDiskUse(true) guards the remaining blocking stages on prod-scale data.
     const customers = await Customer.aggregate([
       { $match: filter },
+      { $sort: sort },
       {
         $lookup: {
           from: "tiers",
@@ -286,12 +299,12 @@ const exportCustomersToExcel = async (req, res) => {
           customer_id: 1,
           name: 1,
           total_points: 1,
+          createdAt: 1,
           tier: { $arrayElemAt: ["$tier", 0] },
           app_type: { $arrayElemAt: ["$app_type", 0] },
         },
       },
-      { $sort: sort },
-    ]);
+    ]).allowDiskUse(true);
 
     // Prepare data for Excel
     const excelData = customers.map((customer) => ({
@@ -322,7 +335,13 @@ const exportCustomersToExcel = async (req, res) => {
 
     return res.send(excelBuffer);
   } catch (error) {
-    logger.error(`Error exporting customers to Excel: ${error.message}`);
+    logger.error(
+      `Error exporting customers to Excel: ${error.name} - ${error.message}`,
+      {
+        stack: error.stack,
+        filter: req.query,
+      }
+    );
     return response_handler(
       res,
       500,
