@@ -20,7 +20,8 @@ const seedRoles = async () => {
                 "VIEW_CUSTOMERS",
                 "EDIT_CUSTOMERS",
                 "DELETE_CUSTOMERS",
-                "EXPORT_CUSTOMERS"
+                "EXPORT_CUSTOMERS",
+                "MANAGE_PRIORITY_CUSTOMERS"
             ],
             points: [
                 "MANAGE_POINTS",
