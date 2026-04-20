@@ -30,10 +30,10 @@ jobs:
           echo "🛠️ Building Docker image..."
           docker build -t loyalty-backend-uat-img .
           echo "🛑 Stopping and removing existing container..."
-          docker rm -f loyalty-backend-uat-container || true
+          docker rm -f loyalty-backend-container || true
           echo "🚀 Starting Docker container with persistent storage..."
           docker run -d \
-            --name loyalty-backend-uat-container \
+            --name loyalty-backend-container \
             --network myapp-network \
             --restart always \
             -p 3000:3000 \
