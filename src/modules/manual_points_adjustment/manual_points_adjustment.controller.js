@@ -10,6 +10,7 @@ const PointCriteria = require("../../models/point_criteria_model");
 const LoyaltyPoints = require("../../models/loyalty_points_model");
 const PointsExpirationRules = require("../../models/points_expiration_rules_model");
 const AppType = require("../../models/app_type_model");
+const BulkPointsJob = require("../../models/bulk_points_job_model");
 
 const REQUIRED_BULK_COLUMNS = ["customer_id", "point_criteria", "note"];
 
@@ -680,9 +681,39 @@ const downloadSampleTemplate = async (req, res) => {
   return res.status(200).send(buffer);
 };
 
+const getBulkJobStatus = async (req, res) => {
+  const { jobId } = req.params;
+
+  if (!jobId) {
+    return response_handler(res, 400, "jobId is required");
+  }
+
+  const job = await BulkPointsJob.findOne({ jobId }).lean();
+
+  if (!job) {
+    return response_handler(res, 404, "Job not found");
+  }
+
+  return response_handler(res, 200, "OK", {
+    jobId: job.jobId,
+    status: job.status,
+    progress: job.progress,
+    processedCount: job.processedCount,
+    successCount: job.successCount,
+    skippedCount: job.skippedCount,
+    failedCount: job.failedCount,
+    totalRows: job.totalRows,
+    estimatedTimeMs: job.estimatedTimeMs,
+    result: job.result,
+    error: job.error,
+    completedAt: job.completedAt,
+  });
+};
+
 module.exports = {
   addPointsIndividual,
   addPointsBulk,
+  getBulkJobStatus,
   reducePoints,
   downloadSampleTemplate,
 };
