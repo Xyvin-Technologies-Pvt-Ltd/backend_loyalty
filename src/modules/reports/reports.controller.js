@@ -249,7 +249,7 @@ const getReportData = async (req, res) => {
                 Transaction.aggregate([
                     {
                         $match: {
-                            transaction_type: "earn",
+                            transaction_type: "adjust",
                             status: "completed",
                             transaction_date: { $gte: startDate, $lte: endDate },
                             transaction_id: { $regex: /^PROMO-/ },
@@ -548,7 +548,7 @@ const getTransactionExportCount = async (req, res) => {
 
                 if (hundredThousandthTransaction && hundredThousandthTransaction.createdAt) {
                     const hundredKDate = new Date(hundredThousandthTransaction.createdAt);
-                    
+
                     // Calculate safe end date: 100k transaction's createdAt date - 1 day
                     // This ensures we get complete date ranges (full days)
                     safeEndDate = new Date(hundredKDate);

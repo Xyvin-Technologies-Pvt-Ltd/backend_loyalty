@@ -231,7 +231,7 @@ const addPointsIndividual = async (req, res) => {
       [
         {
           customer_id: customer._id,
-          transaction_type: "earn",
+          transaction_type: "adjust",
           points: pointsToAward,
           transaction_id: `PROMO-$${uuidv4().slice(0, 8)}`,
           point_criteria: criteria._id,
@@ -455,9 +455,9 @@ const addPointsBulk = async (req, res) => {
         [
           {
             customer_id: customer._id,
-            transaction_type: "earn",
+            transaction_type: "adjust",
             points,
-            transaction_id: `ADMIN-$${uuidv4().slice(0, 9)}`,
+            transaction_id: `PROMO-$${uuidv4().slice(0, 8)}`,
             point_criteria: criteria._id,
             app_type: requestedAppType?._id ?? null,
             status: "completed",
