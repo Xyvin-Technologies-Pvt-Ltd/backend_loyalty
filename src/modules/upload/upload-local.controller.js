@@ -1,6 +1,8 @@
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const fsp = require("fs").promises;
+const { processImageToWebp } = require("../../helpers/image-processor");
 
 // Get the appropriate upload path based on environment
 function getUploadPath() {
@@ -18,28 +20,28 @@ function getUploadPath() {
   }
 }
 
-// Configure multer for file upload
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadPath = getUploadPath();
+function ensureUploadDir() {
+  const uploadPath = getUploadPath();
+  if (!fs.existsSync(uploadPath)) {
+    fs.mkdirSync(uploadPath, { recursive: true });
+    console.log(`📁 Created upload directory: ${uploadPath}`);
+  }
+  return uploadPath;
+}
 
-    // Ensure directory exists
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-      console.log(`📁 Created upload directory: ${uploadPath}`);
-    }
+function buildUniqueFilename(fieldname, extension = "webp") {
+  const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+  return `${fieldname}-${uniqueSuffix}.${extension}`;
+}
 
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    // Generate unique filename with timestamp and random suffix
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const fileExtension = path.extname(file.originalname);
-    const filename = file.fieldname + "-" + uniqueSuffix + fileExtension;
-
-    cb(null, filename);
-  },
-});
+function resolveServerAddress() {
+  return (
+    process.env.IMAGE_SERVER_URL ||
+    (process.env.IMAGE_SERVER_ENV === "UAT"
+      ? "http://141.105.172.45:7733"
+      : "https://khedmahloyalty.oifcoman.com:3737")
+  );
+}
 
 // File filter for images only
 const fileFilter = (req, file, cb) => {
@@ -63,12 +65,12 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Configure multer
+// Configure multer with memoryStorage so we can compress before writing to disk
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024, // Increased to 50MB limit (matching Express body parser)
-    fieldSize: 50 * 1024 * 1024, // Field size limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit for incoming raw upload
+    fieldSize: 50 * 1024 * 1024,
   },
   fileFilter: fileFilter,
 });
@@ -76,7 +78,26 @@ const upload = multer({
 // Multiple upload configurations for flexibility
 const uploadSingle = upload.single("photo"); // Primary field name
 const uploadSingleFile = upload.single("file"); // Alternative field name
-const uploadMultiple = upload.array("photos", 10); // Increased to max 10 files
+const uploadMultiple = upload.array("photos", 10); // Max 10 files
+
+// Compress an in-memory uploaded file and persist it as .webp on disk.
+// Returns the metadata the response needs.
+async function compressAndSave(file, uploadPath) {
+  const processed = await processImageToWebp(file.buffer);
+  const filename = buildUniqueFilename(file.fieldname || "photo", processed.extension);
+  const filePath = path.join(uploadPath, filename);
+  await fsp.writeFile(filePath, processed.buffer);
+
+  return {
+    filename,
+    path: filePath,
+    size: processed.size,
+    mimetype: processed.mimetype,
+    originalName: file.originalname,
+    originalMimetype: file.mimetype,
+    originalSize: file.size,
+  };
+}
 
 // Upload controller functions
 const uploadController = {
@@ -102,7 +123,6 @@ const uploadController = {
             });
           }
 
-          // Handle successful upload with 'file' field
           handleSuccessfulUpload(req, res, "file");
         });
       } else if (err) {
@@ -113,7 +133,6 @@ const uploadController = {
           error: "UPLOAD_ERROR",
         });
       } else {
-        // Handle successful upload with 'photo' field
         handleSuccessfulUpload(req, res, "photo");
       }
     });
@@ -121,7 +140,7 @@ const uploadController = {
 
   // Multiple photos upload
   uploadMultiplePhotos: (req, res) => {
-    uploadMultiple(req, res, (err) => {
+    uploadMultiple(req, res, async (err) => {
       console.log(
         "📤 Multiple photos upload attempt:",
         req.files ? `${req.files.length} files` : "No files"
@@ -147,30 +166,52 @@ const uploadController = {
         });
       }
 
-      // Files uploaded successfully
-      const uploadedFiles = req.files.map((file) => {
-        console.log(`✅ File uploaded: ${file.filename}`);
-        return {
-          filename: file.filename,
-          originalName: file.originalname,
-          size: file.size,
-          mimetype: file.mimetype,
-          url: `/uploads/${file.filename}`,
-          path: file.path,
-        };
-      });
+      try {
+        const uploadPath = ensureUploadDir();
+        const serverAddress = resolveServerAddress();
 
-      console.log(`✅ ${uploadedFiles.length} files uploaded successfully`);
+        const processedFiles = await Promise.all(
+          req.files.map((file) => compressAndSave(file, uploadPath))
+        );
 
-      res.status(200).json({
-        success: true,
-        message: `${uploadedFiles.length} files uploaded successfully`,
-        data: {
-          files: uploadedFiles,
-          count: uploadedFiles.length,
-          uploadedAt: new Date().toISOString(),
-        },
-      });
+        const uploadedFiles = processedFiles.map((info) => {
+          console.log(
+            `✅ File compressed & saved: ${info.filename} (${info.originalSize} → ${info.size} bytes)`
+          );
+          return {
+            filename: info.filename,
+            originalName: info.originalName,
+            size: info.size,
+            mimetype: info.mimetype,
+            url: `${serverAddress}/uploads/${info.filename}`,
+            path: info.path,
+          };
+        });
+
+        console.log(
+          `✅ ${uploadedFiles.length} files uploaded successfully (compressed to webp)`
+        );
+
+        res.status(200).json({
+          success: true,
+          message: `${uploadedFiles.length} files uploaded successfully`,
+          data: {
+            files: uploadedFiles,
+            count: uploadedFiles.length,
+            uploadedAt: new Date().toISOString(),
+          },
+        });
+      } catch (processingError) {
+        console.error(
+          "❌ Image processing/save error:",
+          processingError.message
+        );
+        return res.status(400).json({
+          success: false,
+          message: `Image processing failed: ${processingError.message}`,
+          error: "IMAGE_PROCESSING_ERROR",
+        });
+      }
     });
   },
 
@@ -213,6 +254,7 @@ const uploadController = {
             "image/gif",
             "image/webp",
           ],
+          storedAs: "image/webp (compressed)",
           maxFiles: 10,
           acceptedFieldNames: {
             single: ["photo", "file"],
@@ -232,14 +274,12 @@ const uploadController = {
   },
 };
 
-// Helper function to handle successful uploads
-function handleSuccessfulUpload(req, res, fieldUsed) {
-  const uploadPath = getUploadPath();
+// Helper function to handle successful single uploads
+async function handleSuccessfulUpload(req, res, fieldUsed) {
   console.log(
     `📤 Single photo upload attempt with field "${fieldUsed}":`,
     req.file ? "File received" : "No file"
   );
-  console.log(`📁 Upload directory: ${uploadPath}`);
 
   if (!req.file) {
     console.log("❌ No file uploaded");
@@ -251,25 +291,33 @@ function handleSuccessfulUpload(req, res, fieldUsed) {
     });
   }
 
-  // File uploaded successfully
-  //find server adddress and add server address to the url
-  let serverAddress = ''
-  if(process.env.IMAGE_SERVER_ENV === 'UAT'){
-    serverAddress = 'http://141.105.172.45:7733'
-  }else {
-    serverAddress = 'https://khedmahloyalty.oifcoman.com:3737'
+  try {
+    const uploadPath = ensureUploadDir();
+    console.log(`📁 Upload directory: ${uploadPath}`);
+
+    const info = await compressAndSave(req.file, uploadPath);
+    const serverAddress = resolveServerAddress();
+    const fileUrl = `${serverAddress}/uploads/${info.filename}`;
+
+    console.log(
+      `✅ Compressed & saved: ${info.filename} (${info.originalSize} → ${info.size} bytes) ${fileUrl}`
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "File uploaded successfully",
+      data: {
+        url: fileUrl,
+      },
+    });
+  } catch (processingError) {
+    console.error("❌ Image processing/save error:", processingError.message);
+    return res.status(400).json({
+      success: false,
+      message: `Image processing failed: ${processingError.message}`,
+      error: "IMAGE_PROCESSING_ERROR",
+    });
   }
-
-  const fileUrl = serverAddress + `/uploads/${req.file.filename}`;
-  console.log(fileUrl);
-
-  res.status(200).json({
-    success: true,
-    message: "File uploaded successfully",
-    data: {
-      url: fileUrl,
-    },
-  });
 }
 
 module.exports = uploadController;

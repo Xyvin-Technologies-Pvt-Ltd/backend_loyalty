@@ -3,6 +3,7 @@ const multer = require("multer");
 const {
   addPointsIndividual,
   addPointsBulk,
+  getBulkJobStatus,
   reducePoints,
   downloadSampleTemplate,
 } = require("./manual_points_adjustment.controller");
@@ -65,6 +66,12 @@ router.post(
     { pattern: cachePatterns.custom("dashboard") }
   ),
   addPointsBulk
+);
+
+router.get(
+  "/add-bulk/status/:jobId",
+  authorizePermission("ADJUST_POINTS"),
+  getBulkJobStatus
 );
 
 router.post(

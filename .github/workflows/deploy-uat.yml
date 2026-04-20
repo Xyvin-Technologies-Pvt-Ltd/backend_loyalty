@@ -1,0 +1,43 @@
+name: UAT - Deploy Backend
+
+on:
+  push:
+    branches:
+      - UAT
+
+jobs:
+  deploy-backend-uat:
+    name: Deploy Backend to UAT Server
+    runs-on: [self-hosted, uat-backend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Use .env and deploy with Docker
+        run: |
+          set -e
+          ENV_FILE_PATH=/home/loyalty/loyalty/.env/.env.uat
+          if [ -f "$ENV_FILE_PATH" ]; then
+            echo "✅ .env file found at $ENV_FILE_PATH"
+            cp $ENV_FILE_PATH .env
+          else
+            echo "❌ .env file not found at $ENV_FILE_PATH"
+            exit 1
+          fi
+          echo "📁 Creating persistent upload directory..."
+          mkdir -p /home/loyalty/loyalty-uploads-uat
+          echo "🛠️ Building Docker image..."
+          docker build -t loyalty-backend-uat-img .
+          echo "🛑 Stopping and removing existing container..."
+          docker rm -f loyalty-backend-container || true
+          echo "🚀 Starting Docker container with persistent storage..."
+          docker run -d \
+            --name loyalty-backend-container \
+            --network myapp-network \
+            --restart always \
+            -p 3000:3000 \
+            --env-file .env \
+            -v /home/loyalty/loyalty-uploads-uat:/app/uploads \
+            loyalty-backend-uat-img
+          echo "✅ UAT deployment complete!"

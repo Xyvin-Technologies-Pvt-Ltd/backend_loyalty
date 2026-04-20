@@ -199,12 +199,25 @@ const getAllCustomers = async (req, res) => {
   }
 };
 
+function escapeCsvCell(value) {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (/[\r\n",]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function rowsToCsv(rows) {
+  return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n");
+}
+
 /**
- * Export customers to Excel
+ * Export customers as CSV (UTF-8 with BOM for Excel compatibility)
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-const exportCustomersToExcel = async (req, res) => {
+const exportCustomersToCsv = async (req, res) => {
   try {
     const {
       name,
@@ -258,13 +271,26 @@ const exportCustomersToExcel = async (req, res) => {
       }
     }
 
-    // Build sort object
-    const sort = {};
-    sort[sort_by] = sort_order === "asc" ? 1 : -1;
+    // Build sort object. Whitelist sort_by to avoid unindexed sorts on arbitrary fields,
+    // which is what blows past Mongo's 100MB in-memory sort limit on large collections.
+    const allowedSortFields = [
+      "createdAt",
+      "name",
+      "total_points",
+      "customer_id",
+    ];
+    const safeSortBy = allowedSortFields.includes(sort_by)
+      ? sort_by
+      : "createdAt";
+    const sort = { [safeSortBy]: sort_order === "asc" ? 1 : -1 };
 
-    // Fetch all customers matching filters (no pagination)
+    // Fetch all customers matching filters (no pagination).
+    // $sort runs before $lookup so Mongo can use the { createdAt, app_type } index
+    // and so the sort operates on small documents (not post-lookup arrays).
+    // allowDiskUse(true) guards the remaining blocking stages on prod-scale data.
     const customers = await Customer.aggregate([
       { $match: filter },
+      { $sort: sort },
       {
         $lookup: {
           from: "tiers",
@@ -286,43 +312,45 @@ const exportCustomersToExcel = async (req, res) => {
           customer_id: 1,
           name: 1,
           total_points: 1,
+          createdAt: 1,
           tier: { $arrayElemAt: ["$tier", 0] },
           app_type: { $arrayElemAt: ["$app_type", 0] },
         },
       },
-      { $sort: sort },
+    ]).allowDiskUse(true);
+
+    const header = [
+      "Customer ID",
+      "Name",
+      "Registered Through",
+      "Total Points",
+      "Tier",
+    ];
+
+    const dataRows = customers.map((customer) => [
+      customer.customer_id || "",
+      customer.name || "",
+      customer.app_type?.name?.en || customer.app_type?.name || "",
+      customer.total_points ?? 0,
+      customer.tier?.name?.en || customer.tier?.name || "",
     ]);
 
-    // Prepare data for Excel
-    const excelData = customers.map((customer) => ({
-      "Customer ID": customer.customer_id || "",
-      Name: customer.name || "",
-      "Registered Through": customer.app_type?.name?.en || customer.app_type?.name || "",
-      "Total Points": customer.total_points || 0,
-      Tier: customer.tier?.name?.en || customer.tier?.name || "",
-    }));
+    const csvBody = rowsToCsv([header, ...dataRows]);
+    const csvBuffer = Buffer.from(`\uFEFF${csvBody}`, "utf8");
 
-    // Create workbook and worksheet
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Customers");
-
-    // Generate Excel buffer
-    const excelBuffer = XLSX.write(workbook, {
-      type: "buffer",
-      bookType: "xlsx",
-    });
-
-    // Set response headers
-    const filename = `customers_export_${new Date().toISOString().split("T")[0]}.xlsx`;
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const filename = `customers_export_${new Date().toISOString().split("T")[0]}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-    return res.send(excelBuffer);
+    return res.send(csvBuffer);
   } catch (error) {
-    logger.error(`Error exporting customers to Excel: ${error.message}`);
+    logger.error(
+      `Error exporting customers to CSV: ${error.name} - ${error.message}`,
+      {
+        stack: error.stack,
+        filter: req.query,
+      }
+    );
     return response_handler(
       res,
       500,
@@ -758,5 +786,5 @@ module.exports = {
   deleteCustomer,
   getCustomerDashboard,
   importCustomersFromExcel,
-  exportCustomersToExcel,
+  exportCustomersToCsv,
 };

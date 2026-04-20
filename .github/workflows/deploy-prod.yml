@@ -1,4 +1,4 @@
-name: PROD Loyalty Backends
+name: PROD - Deploy Backend
 
 on:
   push:
@@ -6,22 +6,18 @@ on:
       - prod
 
 jobs:
-  deploy-backend:
-    name: Deploy Backend to VPN Server
+  deploy-backend-prod:
+    name: Deploy Backend to Production Server
     runs-on: [self-hosted, prod-backend]
 
     steps:
-      # Step 1: Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Step 2: Set up Docker and deploy the backend
       - name: Use .env and deploy with Docker
         run: |
-          set -e  # Fail if any command fails
-          # Define the environment file path
+          set -e
           ENV_FILE_PATH=/home/loyalty/loyalty/.env/.env.production
-          # Check if the .env file exists on the server
           if [ -f "$ENV_FILE_PATH" ]; then
             echo "✅ .env file found at $ENV_FILE_PATH"
             cp $ENV_FILE_PATH .env
@@ -29,16 +25,12 @@ jobs:
             echo "❌ .env file not found at $ENV_FILE_PATH"
             exit 1
           fi
-          # Create persistent upload directory on host if it doesn't exist
           echo "📁 Creating persistent upload directory..."
           mkdir -p /home/loyalty/loyalty-uploads
-          # Step 3: Build Docker image
           echo "🛠️ Building Docker image..."
           docker build -t loyalty-backend-img .
-          # Step 4: Stop and remove any existing container
           echo "🛑 Stopping and removing existing container..."
           docker rm -f loyalty-backend-container || true
-          # Step 5: Run the Docker container with volume mount for uploads
           echo "🚀 Starting Docker container with persistent storage..."
           docker run -d \
             --name loyalty-backend-container \
@@ -48,4 +40,4 @@ jobs:
             --env-file .env \
             -v /home/loyalty/loyalty-uploads:/app/uploads \
             loyalty-backend-img
-          echo "✅ Deployment complete with persistent file storage!"
+          echo "✅ Production deployment complete!"
