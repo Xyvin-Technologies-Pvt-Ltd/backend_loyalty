@@ -45,6 +45,7 @@
     "mysql2": "^3.14.3",
     "nodemon": "^3.1.9",
     "prom-client": "^14.2.0",
+    "sharp": "^0.34.5",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.1",
