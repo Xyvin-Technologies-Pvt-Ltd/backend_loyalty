@@ -199,12 +199,25 @@ const getAllCustomers = async (req, res) => {
   }
 };
 
+function escapeCsvCell(value) {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (/[\r\n",]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function rowsToCsv(rows) {
+  return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n");
+}
+
 /**
- * Export customers to Excel
+ * Export customers as CSV (UTF-8 with BOM for Excel compatibility)
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-const exportCustomersToExcel = async (req, res) => {
+const exportCustomersToCsv = async (req, res) => {
   try {
     const {
       name,
@@ -306,37 +319,33 @@ const exportCustomersToExcel = async (req, res) => {
       },
     ]).allowDiskUse(true);
 
-    // Prepare data for Excel
-    const excelData = customers.map((customer) => ({
-      "Customer ID": customer.customer_id || "",
-      Name: customer.name || "",
-      "Registered Through": customer.app_type?.name?.en || customer.app_type?.name || "",
-      "Total Points": customer.total_points || 0,
-      Tier: customer.tier?.name?.en || customer.tier?.name || "",
-    }));
+    const header = [
+      "Customer ID",
+      "Name",
+      "Registered Through",
+      "Total Points",
+      "Tier",
+    ];
 
-    // Create workbook and worksheet
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const dataRows = customers.map((customer) => [
+      customer.customer_id || "",
+      customer.name || "",
+      customer.app_type?.name?.en || customer.app_type?.name || "",
+      customer.total_points ?? 0,
+      customer.tier?.name?.en || customer.tier?.name || "",
+    ]);
 
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Customers");
+    const csvBody = rowsToCsv([header, ...dataRows]);
+    const csvBuffer = Buffer.from(`\uFEFF${csvBody}`, "utf8");
 
-    // Generate Excel buffer
-    const excelBuffer = XLSX.write(workbook, {
-      type: "buffer",
-      bookType: "xlsx",
-    });
-
-    // Set response headers
-    const filename = `customers_export_${new Date().toISOString().split("T")[0]}.xlsx`;
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const filename = `customers_export_${new Date().toISOString().split("T")[0]}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-    return res.send(excelBuffer);
+    return res.send(csvBuffer);
   } catch (error) {
     logger.error(
-      `Error exporting customers to Excel: ${error.name} - ${error.message}`,
+      `Error exporting customers to CSV: ${error.name} - ${error.message}`,
       {
         stack: error.stack,
         filter: req.query,
@@ -777,5 +786,5 @@ module.exports = {
   deleteCustomer,
   getCustomerDashboard,
   importCustomersFromExcel,
-  exportCustomersToExcel,
+  exportCustomersToCsv,
 };
