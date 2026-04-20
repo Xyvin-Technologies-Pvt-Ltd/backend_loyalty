@@ -4,12 +4,16 @@ const mongoose = require("mongoose");
 const response_handler = require("../../helpers/response_handler");
 const { SafeTransaction } = require("../../helpers/transaction");
 const { logger } = require("../../middlewares/logger");
+const { queues } = require("../../config/queue");
 const Transaction = require("../../models/transaction_model");
 const Customer = require("../../models/customer_model");
 const PointCriteria = require("../../models/point_criteria_model");
 const LoyaltyPoints = require("../../models/loyalty_points_model");
 const PointsExpirationRules = require("../../models/points_expiration_rules_model");
 const AppType = require("../../models/app_type_model");
+const BulkPointsJob = require("../../models/bulk_points_job_model");
+
+const BULK_POINTS_ESTIMATED_MS_PER_ROW = 2000;
 
 const REQUIRED_BULK_COLUMNS = ["customer_id", "point_criteria", "note"];
 
@@ -441,129 +445,95 @@ const addPointsBulk = async (req, res) => {
     );
   }
 
-  const transaction = new SafeTransaction();
-  const txSession = await transaction.start();
+  const jobId = uuidv4();
+  const totalRows = enrichedRows.length;
+  const estimatedTimeMs = totalRows * BULK_POINTS_ESTIMATED_MS_PER_ROW;
+
+  const serializedRows = enrichedRows.map((entry) => ({
+    rowNumber: entry.rowNumber,
+    customerId: entry.customer._id.toString(),
+    customerIdStr: entry.customer.customer_id,
+    criteriaId: entry.criteria._id.toString(),
+    criteriaUniqueCode: entry.criteria.unique_code,
+    tierId: entry.customer.tier?._id?.toString() || null,
+    points: entry.points,
+    note: entry.note,
+  }));
 
   try {
-    const requestedAppType = await findAppType(requestedBy, txSession);
-    const processedDetails = [];
+    await BulkPointsJob.create({
+      jobId,
+      status: "pending",
+      totalRows,
+      estimatedTimeMs,
+      requestedBy,
+      createdBy: req.user?._id ?? null,
+    });
 
-    for (const entry of enrichedRows) {
-      const { customer, criteria, points, note, rowNumber } = entry;
-
-      const [createdTransaction] = await Transaction.create(
-        [
-          {
-            customer_id: customer._id,
-            transaction_type: "adjust",
-            points,
-            transaction_id: `PROMO-$${uuidv4().slice(0, 8)}`,
-            point_criteria: criteria._id,
-            app_type: requestedAppType?._id ?? null,
-            status: "completed",
-            note: buildManualNote("addition", note),
-            metadata: buildManualMetadata({
-              requested_by: requestedBy,
-              point_criteria_code: criteria.unique_code,
-              bulk_row: rowNumber,
-            }),
-            transaction_date: new Date(),
-          },
-        ],
-        { session: txSession }
-      );
-
-      const updatedCustomer = await Customer.findByIdAndUpdate(
-        customer._id,
-        {
-          $inc: {
-            total_points: points,
-            coins: points,
-          },
-        },
-        { new: true, session: txSession }
-      );
-
-      try {
-        const expiryDate = await PointsExpirationRules.calculateExpiryDate(
-          customer.tier?._id ?? null
-        );
-
-        await LoyaltyPoints.create(
-          [
-            {
-              customer_id: customer._id,
-              points,
-              expiryDate,
-              transaction_id: createdTransaction._id,
-              earnedAt: new Date(),
-              status: "active",
-              metadata: buildManualMetadata({
-                requested_by: requestedBy,
-                bulk_row: rowNumber,
-              }),
-            },
-          ],
-          { session: txSession }
-        );
-      } catch (error) {
-        logger.error(
-          `Error creating loyalty point entry for bulk upload: ${error.message}`,
-          {
-            customer_id: customer.customer_id,
-            row: rowNumber,
-            stack: error.stack,
-          }
-        );
+    await queues.points.add(
+      "bulk-points-add",
+      {
+        jobId,
+        requestedBy,
+        createdBy: req.user?._id?.toString?.() ?? null,
+        enrichedRows: serializedRows,
+      },
+      {
+        removeOnComplete: { count: 100 },
+        removeOnFail: false,
+        attempts: 1,
       }
+    );
 
-      processedDetails.push({
-        row: rowNumber,
-        customer_id: customer.customer_id,
-        transaction_id: createdTransaction.transaction_id,
-        new_balance: updatedCustomer.total_points,
-      });
-    }
-
-    try {
-      const tierController = require("../tier/tier.controller");
-      for (const entry of enrichedRows) {
-        await tierController.checkAndUpgradeTier(
-          entry.customer._id,
-          null,
-          txSession
-        );
-      }
-    } catch (error) {
-      logger.error(
-        `Error evaluating tier upgrades for bulk upload: ${error.message}`,
-        {
-          stack: error.stack,
-        }
-      );
-    }
-
-    await transaction.commit();
-
-    return response_handler(res, 200, "Bulk manual points added successfully", {
-      total_rows: enrichedRows.length,
-      success_count: enrichedRows.length,
-      details: processedDetails,
+    return res.status(202).json({
+      status: 202,
+      message: "Bulk upload accepted. Processing in background.",
+      data: {
+        jobId,
+        totalRows,
+        estimatedTimeMs,
+      },
     });
   } catch (error) {
-    await transaction.abort();
-    logger.error(`Error processing bulk manual points: ${error.message}`, {
+    logger.error(`Error enqueueing bulk points job: ${error.message}`, {
       stack: error.stack,
     });
     return response_handler(
       res,
       500,
-      "Failed to process bulk manual points",
+      "Failed to start bulk upload",
       error.message
     );
-  } finally {
-    await transaction.end();
   }
+};
+
+const getBulkJobStatus = async (req, res) => {
+  const { jobId } = req.params;
+
+  if (!jobId) {
+    return response_handler(res, 400, "jobId is required");
+  }
+
+  const job = await BulkPointsJob.findOne({ jobId }).lean();
+
+  if (!job) {
+    return response_handler(res, 404, "Job not found");
+  }
+
+  return response_handler(res, 200, "OK", {
+    jobId: job.jobId,
+    status: job.status,
+    progress: job.progress,
+    processedCount: job.processedCount,
+    successCount: job.successCount,
+    skippedCount: job.skippedCount,
+    failedCount: job.failedCount,
+    totalRows: job.totalRows,
+    estimatedTimeMs: job.estimatedTimeMs,
+    result: job.result,
+    error: job.error,
+    completedAt: job.completedAt,
+  });
 };
 
 const reducePoints = async (req, res) => {
@@ -683,6 +653,7 @@ const downloadSampleTemplate = async (req, res) => {
 module.exports = {
   addPointsIndividual,
   addPointsBulk,
+  getBulkJobStatus,
   reducePoints,
   downloadSampleTemplate,
 };

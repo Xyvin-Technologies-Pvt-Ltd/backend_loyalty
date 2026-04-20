@@ -1145,7 +1145,8 @@ const cancelRedemption = async (req, res) => {
           note: `Cancellation of redemption - Original transaction: ${transaction_id}`,
           metadata: {
             original_transaction_id: transaction_id,
-            requested_by: "Khedmah SDK",
+            requested_by: originalTransaction.metadata?.requested_by || "Khedmah SDK",
+            cancellation_triggered_by: "Khedmah SDK",
           },
           transaction_date: new Date(),
         },

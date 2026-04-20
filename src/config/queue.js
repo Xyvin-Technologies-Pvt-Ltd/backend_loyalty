@@ -3,16 +3,17 @@
  * Sets up BullMQ queues for background job processing
  */
 
-const { Queue, Worker, QueueScheduler } = require("bullmq");
+const { Queue, Worker } = require("bullmq");
 const { logger } = require("../middlewares/logger");
 const { redisClient } = require("./redis");
 
-// Redis connection options
+// Redis connection options for BullMQ
+// Redis Cloud free tier only supports DB 0, so we must not set a db index
 const connection = {
   host: process.env.REDIS_HOST || "localhost",
   port: process.env.REDIS_PORT || 6379,
+  username: process.env.REDIS_USERNAME || "default",
   password: process.env.REDIS_PASSWORD || "",
-  db: process.env.REDIS_QUEUE_DB || 1, // Use a different DB than cache
 };
 
 // Define queues
@@ -36,15 +37,6 @@ const queues = {
   analytics: new Queue("analytics", { connection }),
 };
 
-// Initialize queue schedulers
-const schedulers = {
-  email: new QueueScheduler("email", { connection }),
-  notification: new QueueScheduler("notification", { connection }),
-  points: new QueueScheduler("points", { connection }),
-  segmentRefresh: new QueueScheduler("segment-refresh", { connection }),
-  export: new QueueScheduler("export", { connection }),
-  analytics: new QueueScheduler("analytics", { connection }),
-};
 
 /**
  * Add a job to a queue
@@ -103,7 +95,7 @@ const createWorker = (queueName, processor, options = {}) => {
     });
 
     worker.on("error", (err) => {
-      logger.error("Worker error", { queueName, error: err.message });
+      logger.error("Worker error", { queueName, error: err.message, code: err.code });
     });
 
     logger.info("Worker created", { queueName });
@@ -141,12 +133,6 @@ const shutdownQueues = async (workers = {}) => {
   // Close all workers
   const workerPromises = Object.values(workers).map((worker) => worker.close());
   await Promise.all(workerPromises);
-
-  // Close all schedulers
-  const schedulerPromises = Object.values(schedulers).map((scheduler) =>
-    scheduler.close()
-  );
-  await Promise.all(schedulerPromises);
 
   // Close all queues
   const queuePromises = Object.values(queues).map((queue) => queue.close());
