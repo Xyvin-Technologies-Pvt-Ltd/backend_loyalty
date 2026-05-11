@@ -72,6 +72,7 @@ const getReportData = async (req, res) => {
                 promoPointsResult,
                 adminReductionResult,
                 expiredPointsResult,
+                cancellationStatsResult,
             ] = await Promise.all([
                 // 0. Opening User Count
                 Customer.aggregate([
@@ -298,6 +299,28 @@ const getReportData = async (req, res) => {
                         },
                     },
                 ]),
+                // 9. Redemption Cancellations (adjust transactions with _cancelled suffix)
+                // These are positive-point reversals created when a redemption is cancelled
+                // via the SDK. They affect the closing balance but were previously missing
+                // from the displayed breakdown, causing Net Movement to not reconcile.
+                Transaction.aggregate([
+                    {
+                        $match: {
+                            transaction_type: "adjust",
+                            status: "completed",
+                            transaction_date: { $gte: startDate, $lte: endDate },
+                            transaction_id: { $regex: /_cancelled$/ },
+                            "metadata.requested_by": appTypeName,
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            transactionCount: { $sum: 1 },
+                            totalPoints: { $sum: "$points" },
+                        },
+                    },
+                ]),
             ]);
 
             return {
@@ -321,6 +344,10 @@ const getReportData = async (req, res) => {
                     totalPromoPoints: promoPointsResult[0]?.totalPoints || 0,
                     adminReductionPoints: adminReductionResult[0]?.totalPoints || 0,
                     totalExpiredPoints: expiredPointsResult[0]?.totalPoints || 0,
+                    redemptionCancellations: {
+                        transactionCount: cancellationStatsResult[0]?.transactionCount || 0,
+                        totalPoints: cancellationStatsResult[0]?.totalPoints || 0,
+                    },
                 },
             };
         };
@@ -348,6 +375,8 @@ const getReportData = async (req, res) => {
         let totalExpiredPoints = 0;
         let totalOpeningBalance = 0;
         let totalClosingBalance = 0;
+        let totalCancellationTransactionCount = 0;
+        let totalCancellationPoints = 0;
 
         for (const appType of appTypes) {
             const appTypeData = reportData[appType.name];
@@ -365,6 +394,8 @@ const getReportData = async (req, res) => {
             totalExpiredPoints += appTypeData.totalExpiredPoints;
             totalOpeningBalance += appTypeData.openingBalance;
             totalClosingBalance += appTypeData.closingBalance;
+            totalCancellationTransactionCount += appTypeData.redemptionCancellations.transactionCount;
+            totalCancellationPoints += appTypeData.redemptionCancellations.totalPoints;
         }
 
         // Calculate net movement from summed balances
@@ -396,6 +427,10 @@ const getReportData = async (req, res) => {
                 totalPromoPoints,
                 totalExpiredPoints,
                 adminReductionPoints: totalAdminReductionPoints,
+                redemptionCancellations: {
+                    transactionCount: totalCancellationTransactionCount,
+                    totalPoints: totalCancellationPoints,
+                },
                 openingBalance: totalOpeningBalance,
                 closingBalance: totalClosingBalance,
                 netMovement: netMovementTotal,
