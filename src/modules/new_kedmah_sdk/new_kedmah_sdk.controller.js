@@ -1133,6 +1133,40 @@ const cancelRedemption = async (req, res) => {
     // Calculate points to restore (reverse the negative points)
     const pointsToRestore = Math.abs(originalTransaction.points);
 
+    // Resolve requested_by in priority order to avoid orphaning the cancellation
+    // to "Khedmah SDK" when the original redemption lacks metadata.requested_by.
+    // 1. Use the original redemption's metadata.requested_by (most common path).
+    // 2. Fall back to the AppType name stored on the original transaction's app_type field.
+    // 3. Fall back to the customer's first AppType entry.
+    // 4. Last-resort: "Khedmah SDK".
+    let resolvedRequestedBy = originalTransaction.metadata?.requested_by || null;
+    let resolvedAppTypeId = originalTransaction.app_type || null;
+
+    if (!resolvedRequestedBy && originalTransaction.app_type) {
+      const appTypeDoc = await AppType.findById(originalTransaction.app_type).lean().session(session);
+      if (appTypeDoc?.name) {
+        resolvedRequestedBy = appTypeDoc.name;
+      }
+    }
+
+    if (!resolvedRequestedBy) {
+      const customerDoc = await Customer.findById(originalTransaction.customer_id._id, "app_type")
+        .lean()
+        .session(session);
+      const appTypeEntries = customerDoc?.app_type || [];
+      if (appTypeEntries.length > 0) {
+        const appTypeDoc = await AppType.findById(appTypeEntries[0]).lean().session(session);
+        if (appTypeDoc?.name) {
+          resolvedRequestedBy = appTypeDoc.name;
+          if (!resolvedAppTypeId) resolvedAppTypeId = appTypeEntries[0];
+        }
+      }
+    }
+
+    if (!resolvedRequestedBy) {
+      resolvedRequestedBy = "Khedmah SDK";
+    }
+
     // Create cancellation transaction
     await Transaction.create(
       [
@@ -1142,10 +1176,11 @@ const cancelRedemption = async (req, res) => {
           transaction_type: "adjust",
           points: pointsToRestore,
           status: "completed",
+          app_type: resolvedAppTypeId,
           note: `Cancellation of redemption - Original transaction: ${transaction_id}`,
           metadata: {
             original_transaction_id: transaction_id,
-            requested_by: originalTransaction.metadata?.requested_by || "Khedmah SDK",
+            requested_by: resolvedRequestedBy,
             cancellation_triggered_by: "Khedmah SDK",
           },
           transaction_date: new Date(),
