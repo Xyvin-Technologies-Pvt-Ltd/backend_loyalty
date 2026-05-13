@@ -501,6 +501,26 @@ const escapeCSVValue = (value) => {
 };
 
 /**
+ * Derive a descriptive transaction_type label for the CSV.
+ * "adjust" rows are sub-categorised by transaction_id prefix/suffix so that
+ * the Transaction Report CSV reconciles with the Summary Report breakdown:
+ *   - adjust + _cancelled suffix  → "redemption_cancellation"
+ *   - adjust + PROMO- prefix      → "promotion"
+ *   - adjust + ADMIN- prefix      → "admin_reduction"
+ *   - all other types             → raw transaction_type unchanged
+ */
+const deriveTxType = (transaction) => {
+    if (transaction.transaction_type === "adjust") {
+        const id = transaction.transaction_id || "";
+        if (/_cancelled$/.test(id)) return "redemption_cancellation";
+        if (/^PROMO-/.test(id)) return "promotion";
+        if (/^ADMIN-/.test(id)) return "admin_reduction";
+        return "adjust";
+    }
+    return transaction.transaction_type || "";
+};
+
+/**
  * Helper function to format a transaction row for CSV
  */
 const formatTransactionRow = (transaction, expiryDate) => {
@@ -518,7 +538,7 @@ const formatTransactionRow = (transaction, expiryDate) => {
         transaction._id.toString(),
         transaction.transaction_id || "",
         transaction.metadata?.original_transaction_id || "",
-        transaction.transaction_type || "",
+        deriveTxType(transaction),
         transaction.points || 0,
         criteriaCodes,
         transaction.metadata?.requested_by || "",
@@ -731,6 +751,9 @@ const exportTransactionReport = async (req, res) => {
         let processedCount = 0;
         let batch = [];
         let expiryMap = {};
+        // #region agent log - accumulate per-type/per-requested_by stats for post-stream verification
+        const debugTypeCounts = {};
+        // #endregion
 
         logger.info(`Starting transaction export stream`, {
             startDate: startDate.toISOString(),
@@ -776,6 +799,12 @@ const exportTransactionReport = async (req, res) => {
                         const row = formatTransactionRow(txn, expiryDate);
                         res.write(row + "\n");
                         processedCount++;
+                        // #region agent log
+                        const dk = `${deriveTxType(txn)}|${txn.metadata?.requested_by || ""}`;
+                        if (!debugTypeCounts[dk]) debugTypeCounts[dk] = { count: 0, totalPoints: 0 };
+                        debugTypeCounts[dk].count++;
+                        debugTypeCounts[dk].totalPoints += (txn.points || 0);
+                        // #endregion
                     } catch (rowError) {
                         logger.error(`Error processing transaction row: ${rowError.message}`, {
                             transactionId: txn._id,
@@ -826,6 +855,12 @@ const exportTransactionReport = async (req, res) => {
                     const row = formatTransactionRow(txn, expiryDate);
                     res.write(row + "\n");
                     processedCount++;
+                    // #region agent log
+                    const dk = `${deriveTxType(txn)}|${txn.metadata?.requested_by || ""}`;
+                    if (!debugTypeCounts[dk]) debugTypeCounts[dk] = { count: 0, totalPoints: 0 };
+                    debugTypeCounts[dk].count++;
+                    debugTypeCounts[dk].totalPoints += (txn.points || 0);
+                    // #endregion
                 } catch (rowError) {
                     logger.error(`Error processing transaction row: ${rowError.message}`, {
                         transactionId: txn._id,
@@ -833,6 +868,25 @@ const exportTransactionReport = async (req, res) => {
                 }
             }
         }
+
+        // #region agent log - fire summary after all rows written
+        fetch('http://127.0.0.1:7431/ingest/98cfb3b4-06e5-4a3f-9c66-5eb7ccae209c', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '80a4f1' },
+            body: JSON.stringify({
+                sessionId: '80a4f1',
+                runId: 'post-fix-tx-export',
+                location: 'reports.controller.js:exportTransactionReport',
+                message: 'Export stream complete - per-type/per-requested_by breakdown',
+                data: {
+                    dateRange: { startDate: startDate.toISOString(), endDate: endDate.toISOString() },
+                    totalRows: processedCount,
+                    breakdown: debugTypeCounts,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
 
         logger.info(`Transaction export completed: ${processedCount} rows exported`, {
             startDate: startDate.toISOString(),
