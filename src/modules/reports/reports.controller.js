@@ -751,9 +751,6 @@ const exportTransactionReport = async (req, res) => {
         let processedCount = 0;
         let batch = [];
         let expiryMap = {};
-        // #region agent log - accumulate per-type/per-requested_by stats for post-stream verification
-        const debugTypeCounts = {};
-        // #endregion
 
         logger.info(`Starting transaction export stream`, {
             startDate: startDate.toISOString(),
@@ -799,12 +796,6 @@ const exportTransactionReport = async (req, res) => {
                         const row = formatTransactionRow(txn, expiryDate);
                         res.write(row + "\n");
                         processedCount++;
-                        // #region agent log
-                        const dk = `${deriveTxType(txn)}|${txn.metadata?.requested_by || ""}`;
-                        if (!debugTypeCounts[dk]) debugTypeCounts[dk] = { count: 0, totalPoints: 0 };
-                        debugTypeCounts[dk].count++;
-                        debugTypeCounts[dk].totalPoints += (txn.points || 0);
-                        // #endregion
                     } catch (rowError) {
                         logger.error(`Error processing transaction row: ${rowError.message}`, {
                             transactionId: txn._id,
@@ -855,12 +846,6 @@ const exportTransactionReport = async (req, res) => {
                     const row = formatTransactionRow(txn, expiryDate);
                     res.write(row + "\n");
                     processedCount++;
-                    // #region agent log
-                    const dk = `${deriveTxType(txn)}|${txn.metadata?.requested_by || ""}`;
-                    if (!debugTypeCounts[dk]) debugTypeCounts[dk] = { count: 0, totalPoints: 0 };
-                    debugTypeCounts[dk].count++;
-                    debugTypeCounts[dk].totalPoints += (txn.points || 0);
-                    // #endregion
                 } catch (rowError) {
                     logger.error(`Error processing transaction row: ${rowError.message}`, {
                         transactionId: txn._id,
@@ -868,25 +853,6 @@ const exportTransactionReport = async (req, res) => {
                 }
             }
         }
-
-        // #region agent log - fire summary after all rows written
-        fetch('http://127.0.0.1:7431/ingest/98cfb3b4-06e5-4a3f-9c66-5eb7ccae209c', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '80a4f1' },
-            body: JSON.stringify({
-                sessionId: '80a4f1',
-                runId: 'post-fix-tx-export',
-                location: 'reports.controller.js:exportTransactionReport',
-                message: 'Export stream complete - per-type/per-requested_by breakdown',
-                data: {
-                    dateRange: { startDate: startDate.toISOString(), endDate: endDate.toISOString() },
-                    totalRows: processedCount,
-                    breakdown: debugTypeCounts,
-                },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => { });
-        // #endregion
 
         logger.info(`Transaction export completed: ${processedCount} rows exported`, {
             startDate: startDate.toISOString(),
