@@ -501,6 +501,26 @@ const escapeCSVValue = (value) => {
 };
 
 /**
+ * Derive a descriptive transaction_type label for the CSV.
+ * "adjust" rows are sub-categorised by transaction_id prefix/suffix so that
+ * the Transaction Report CSV reconciles with the Summary Report breakdown:
+ *   - adjust + _cancelled suffix  → "redemption_cancellation"
+ *   - adjust + PROMO- prefix      → "promotion"
+ *   - adjust + ADMIN- prefix      → "admin_reduction"
+ *   - all other types             → raw transaction_type unchanged
+ */
+const deriveTxType = (transaction) => {
+    if (transaction.transaction_type === "adjust") {
+        const id = transaction.transaction_id || "";
+        if (/_cancelled$/.test(id)) return "redemption_cancellation";
+        if (/^PROMO-/.test(id)) return "promotion";
+        if (/^ADMIN-/.test(id)) return "admin_reduction";
+        return "adjust";
+    }
+    return transaction.transaction_type || "";
+};
+
+/**
  * Helper function to format a transaction row for CSV
  */
 const formatTransactionRow = (transaction, expiryDate) => {
@@ -518,7 +538,7 @@ const formatTransactionRow = (transaction, expiryDate) => {
         transaction._id.toString(),
         transaction.transaction_id || "",
         transaction.metadata?.original_transaction_id || "",
-        transaction.transaction_type || "",
+        deriveTxType(transaction),
         transaction.points || 0,
         criteriaCodes,
         transaction.metadata?.requested_by || "",
