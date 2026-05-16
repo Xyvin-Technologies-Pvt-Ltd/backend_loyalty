@@ -433,11 +433,20 @@ const viewCustomer = async (req, res) => {
       });
     }
 
+    // Compute the real redeemable balance from LoyaltyPoints (source of truth
+    // for FIFO redemption) so the customer never sees a balance they can't use.
+    const activePointsAgg = await LoyaltyPoints.aggregate([
+      { $match: { customer_id: customer._id, status: "active" } },
+      { $group: { _id: null, total: { $sum: "$points" } } },
+    ]);
+    const redeemableBalance =
+      activePointsAgg.length > 0 ? activePointsAgg[0].total : 0;
+
     const responseData = {
       name: customer.name || "",
       email: customer.email || "",
       mobile: customer.phone || "",
-      point_balance: customer.total_points || 0,
+      point_balance: redeemableBalance,
       customer_tier: customer.tier ? customer.tier.name : "Bronze",
       next_tier: nextTier
         ? {
@@ -810,8 +819,12 @@ const addPoints = async (req, res) => {
               error: expiryError.stack,
             }
           );
-          // Don't abort transaction for expiry record creation failure
-          // The main transaction should still succeed
+          await transaction.abort();
+          return response_handler(
+            res,
+            500,
+            "Failed to create loyalty points record"
+          );
         }
       }
 
@@ -1386,12 +1399,19 @@ const getTransactionHistory = async (req, res) => {
       };
     });
 
+    const txActiveAgg = await LoyaltyPoints.aggregate([
+      { $match: { customer_id: customer._id, status: "active" } },
+      { $group: { _id: null, total: { $sum: "$points" } } },
+    ]);
+    const txRedeemableBalance =
+      txActiveAgg.length > 0 ? txActiveAgg[0].total : 0;
+
     const responseData = {
       customer: {
         name: customer.name || "",
         email: customer.email || "",
         mobile: customer.phone || "",
-        point_balance: customer.total_points || 0,
+        point_balance: txRedeemableBalance,
         customer_tier: customer.tier ? customer.tier.name : "Bronze",
       },
       transactions: formattedTransactions,
