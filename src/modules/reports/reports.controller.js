@@ -882,10 +882,287 @@ const exportTransactionReport = async (req, res) => {
     }
 };
 
+/**
+ * Build the offer-summary aggregation result.
+ * Returns an array of offer rows with per-tier distinct-user counts.
+ */
+const buildOfferSummaryData = async (startDate, endDate) => {
+    const Tier = require("../../models/tier_model");
+
+    const matchStage = { transaction_type: "offer-redeem" };
+    if (startDate || endDate) {
+        matchStage.transaction_date = {};
+        if (startDate) matchStage.transaction_date.$gte = startDate;
+        if (endDate) matchStage.transaction_date.$lte = endDate;
+    }
+
+    // Fetch all active tiers upfront so we can label tier columns
+    const tiers = await Tier.find({ isActive: true })
+        .sort({ hierarchy_level: 1 })
+        .lean();
+
+    const tierMap = {};
+    tiers.forEach((t) => {
+        tierMap[t._id.toString()] = t.name?.en || `Tier ${t.hierarchy_level}`;
+    });
+
+    const pipeline = [
+        { $match: matchStage },
+
+        // Lookup customer to get their tier
+        {
+            $lookup: {
+                from: "customers",
+                localField: "customer_id",
+                foreignField: "_id",
+                as: "customer",
+            },
+        },
+        { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+
+        // Step 1: deduplicate per coupon + tier + customer
+        {
+            $group: {
+                _id: {
+                    coupon_id: "$coupon_id",
+                    tier_id: "$customer.tier",
+                    customer_id: "$customer_id",
+                },
+                redemptions: { $sum: 1 },
+            },
+        },
+
+        // Step 2: group by coupon + tier → count distinct users
+        {
+            $group: {
+                _id: { coupon_id: "$_id.coupon_id", tier_id: "$_id.tier_id" },
+                distinctUserCount: { $sum: 1 },
+                tierRedemptions: { $sum: "$redemptions" },
+            },
+        },
+
+        // Step 3: group by coupon → collect all tier breakdowns
+        {
+            $group: {
+                _id: "$_id.coupon_id",
+                totalRedemptions: { $sum: "$tierRedemptions" },
+                tierData: {
+                    $push: {
+                        tier_id: "$_id.tier_id",
+                        userCount: "$distinctUserCount",
+                    },
+                },
+            },
+        },
+
+        // Lookup offer details
+        {
+            $lookup: {
+                from: "couponcodes",
+                localField: "_id",
+                foreignField: "_id",
+                as: "offer",
+            },
+        },
+        { $unwind: { path: "$offer", preserveNullAndEmptyArrays: true } },
+
+        // Lookup brand
+        {
+            $lookup: {
+                from: "couponbrands",
+                localField: "offer.merchantId",
+                foreignField: "_id",
+                as: "brand",
+            },
+        },
+        { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
+
+        // Lookup category
+        {
+            $lookup: {
+                from: "couponcategories",
+                localField: "offer.couponCategoryId",
+                foreignField: "_id",
+                as: "category",
+            },
+        },
+        { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+
+        // Sort by total redemptions descending
+        { $sort: { totalRedemptions: -1 } },
+    ];
+
+    const rows = await Transaction.aggregate(pipeline).allowDiskUse(true);
+
+    // Reshape: add named tier columns
+    return rows.map((row) => {
+        const tierBreakdown = {};
+        (row.tierData || []).forEach((td) => {
+            if (td.tier_id) {
+                const name = tierMap[td.tier_id.toString()] || "Unknown Tier";
+                tierBreakdown[name] = (tierBreakdown[name] || 0) + td.userCount;
+            } else {
+                tierBreakdown["No Tier"] = (tierBreakdown["No Tier"] || 0) + td.userCount;
+            }
+        });
+
+        return {
+            offer_id: row._id,
+            category: row.category?.title?.en || "-",
+            brand: row.brand?.title?.en || "-",
+            title: row.offer?.title?.en || "-",
+            description: row.offer?.description?.en || "-",
+            totalRedemptions: row.totalRedemptions || 0,
+            tierBreakdown,
+        };
+    });
+};
+
+/**
+ * GET /reports/offer-summary
+ * Returns JSON: list of offers with usage counts and per-tier user breakdown
+ */
+const getOfferSummaryReport = async (req, res) => {
+    try {
+        let { startDate, endDate } = req.query;
+
+        const now = new Date();
+        let parsedStart = null;
+        let parsedEnd = null;
+
+        if (startDate) {
+            parsedStart = new Date(startDate);
+            parsedStart.setHours(0, 0, 0, 0);
+        }
+        if (endDate) {
+            parsedEnd = new Date(endDate);
+            parsedEnd.setHours(23, 59, 59, 999);
+        }
+
+        const data = await buildOfferSummaryData(parsedStart, parsedEnd);
+
+        return response_handler(res, 200, "Offer summary retrieved successfully", {
+            data,
+            dateRange: {
+                startDate: parsedStart ? parsedStart.toISOString() : null,
+                endDate: parsedEnd ? parsedEnd.toISOString() : null,
+            },
+        });
+    } catch (error) {
+        logger.error(`Error retrieving offer summary: ${error.message}`, {
+            stack: error.stack,
+        });
+        return response_handler(res, 500, "Failed to retrieve offer summary", error.message);
+    }
+};
+
+/**
+ * GET /reports/offer-summary/export
+ * Downloads an Excel (.xlsx) file of the offer summary report
+ */
+const exportOfferSummaryReport = async (req, res) => {
+    try {
+        const XLSX = require("xlsx");
+
+        let { startDate, endDate } = req.query;
+
+        let parsedStart = null;
+        let parsedEnd = null;
+
+        if (startDate) {
+            parsedStart = new Date(startDate);
+            parsedStart.setHours(0, 0, 0, 0);
+        }
+        if (endDate) {
+            parsedEnd = new Date(endDate);
+            parsedEnd.setHours(23, 59, 59, 999);
+        }
+
+        const rows = await buildOfferSummaryData(parsedStart, parsedEnd);
+
+        if (rows.length === 0) {
+            return response_handler(res, 200, "No data found for the selected period", null);
+        }
+
+        // Collect all unique tier names from data
+        const tierNames = [];
+        const tierNameSet = new Set();
+        rows.forEach((r) => {
+            Object.keys(r.tierBreakdown).forEach((t) => {
+                if (!tierNameSet.has(t)) {
+                    tierNameSet.add(t);
+                    tierNames.push(t);
+                }
+            });
+        });
+
+        // Build header row
+        const headers = [
+            "Category",
+            "Brand",
+            "Offer Title",
+            "Description",
+            "Total Redemptions",
+            ...tierNames.map((t) => `Users - ${t}`),
+        ];
+
+        // Build data rows
+        const sheetData = [headers];
+        rows.forEach((r) => {
+            const row = [
+                r.category,
+                r.brand,
+                r.title,
+                r.description,
+                r.totalRedemptions,
+                ...tierNames.map((t) => r.tierBreakdown[t] || 0),
+            ];
+            sheetData.push(row);
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+        // Auto-width columns
+        const colWidths = headers.map((h, i) => ({
+            wch: Math.max(
+                h.length,
+                ...sheetData.slice(1).map((r) => String(r[i] || "").length)
+            ),
+        }));
+        ws["!cols"] = colWidths;
+
+        XLSX.utils.book_append_sheet(wb, ws, "Offer Summary");
+
+        const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+        const dateLabel = parsedStart
+            ? `${parsedStart.toISOString().split("T")[0]}_${parsedEnd ? parsedEnd.toISOString().split("T")[0] : "now"}`
+            : "all_time";
+
+        res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename=offer_summary_${dateLabel}.xlsx`
+        );
+        return res.send(buf);
+    } catch (error) {
+        logger.error(`Error exporting offer summary: ${error.message}`, {
+            stack: error.stack,
+        });
+        return response_handler(res, 500, "Failed to export offer summary", error.message);
+    }
+};
+
 module.exports = {
     getReportData,
     exportReportCSV,
     exportTransactionReport,
     getTransactionExportCount,
+    getOfferSummaryReport,
+    exportOfferSummaryReport,
 };
 

@@ -105,7 +105,6 @@ const getAllCustomers = async (req, res) => {
 
     if (name && name.trim() !== "") {
       filter.$or = [
-        { name: { $regex: name, $options: "i" } },
         { customer_id: { $regex: name, $options: "i" } },
         { email: { $regex: name, $options: "i" } },
         { phone: { $regex: name, $options: "i" } },
@@ -239,7 +238,6 @@ const exportCustomersToCsv = async (req, res) => {
 
     if (name && name.trim() !== "") {
       filter.$or = [
-        { name: { $regex: name, $options: "i" } },
         { customer_id: { $regex: name, $options: "i" } },
         { email: { $regex: name, $options: "i" } },
         { phone: { $regex: name, $options: "i" } },
@@ -521,7 +519,7 @@ const getCustomerDashboard = async (req, res) => {
     const pointsEarned = await Transaction.aggregate([
       {
         $match: {
-          customer_id: mongoose.Types.ObjectId(id),
+          customer_id: new mongoose.Types.ObjectId(id),
           points: { $gt: 0 },
           status: "completed",
         },
@@ -532,7 +530,7 @@ const getCustomerDashboard = async (req, res) => {
     const pointsSpent = await Transaction.aggregate([
       {
         $match: {
-          customer_id: mongoose.Types.ObjectId(id),
+          customer_id: new mongoose.Types.ObjectId(id),
           points: { $lt: 0 },
           transaction_type: "redeem",
           status: "completed",
@@ -544,7 +542,7 @@ const getCustomerDashboard = async (req, res) => {
     const pointsExpired = await Transaction.aggregate([
       {
         $match: {
-          customer_id: mongoose.Types.ObjectId(id),
+          customer_id: new mongoose.Types.ObjectId(id),
           points: { $lt: 0 },
           transaction_type: "expire",
           status: "completed",
@@ -565,7 +563,7 @@ const getCustomerDashboard = async (req, res) => {
     const expiringPoints = await LoyaltyPoints.aggregate([
       {
         $match: {
-          customer_id: mongoose.Types.ObjectId(id),
+          customer_id: new mongoose.Types.ObjectId(id),
           expiryDate: {
             $gt: currentDate,
             $lt: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
