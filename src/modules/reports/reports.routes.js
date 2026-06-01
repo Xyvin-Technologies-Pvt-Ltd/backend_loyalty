@@ -4,7 +4,9 @@ const {
   getReportData, 
   exportReportCSV, 
   exportTransactionReport,
-  getTransactionExportCount 
+  getTransactionExportCount,
+  getOfferSummaryReport,
+  exportOfferSummaryReport,
 } = require("./reports.controller");
 const { authorizePermission } = require("../../middlewares/auth/auth");
 const {
@@ -48,6 +50,20 @@ router.get(
   authorizePermission("VIEW_REPORTS"),
   reportsTimeout,
   exportTransactionReport
+);
+
+// Offer summary report (JSON)
+router.get(
+  "/offer-summary",
+  authorizePermission("VIEW_REPORTS"),
+  getOfferSummaryReport
+);
+
+// Offer summary report (Excel export)
+router.get(
+  "/offer-summary/export",
+  authorizePermission("VIEW_REPORTS"),
+  exportOfferSummaryReport
 );
 
 module.exports = router;
