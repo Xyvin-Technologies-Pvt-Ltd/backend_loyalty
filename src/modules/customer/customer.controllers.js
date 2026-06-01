@@ -105,7 +105,6 @@ const getAllCustomers = async (req, res) => {
 
     if (name && name.trim() !== "") {
       filter.$or = [
-        { name: { $regex: name, $options: "i" } },
         { customer_id: { $regex: name, $options: "i" } },
         { email: { $regex: name, $options: "i" } },
         { phone: { $regex: name, $options: "i" } },
@@ -239,7 +238,6 @@ const exportCustomersToCsv = async (req, res) => {
 
     if (name && name.trim() !== "") {
       filter.$or = [
-        { name: { $regex: name, $options: "i" } },
         { customer_id: { $regex: name, $options: "i" } },
         { email: { $regex: name, $options: "i" } },
         { phone: { $regex: name, $options: "i" } },
