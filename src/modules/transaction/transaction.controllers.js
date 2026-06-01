@@ -179,8 +179,23 @@ const getTransactionsByCustomer = async (req, res) => {
       sort_order = "desc",
     } = req.query;
 
-    // Build filter object
-    const filter = { customer_id: customerId };
+    // #region agent log
+    const fs = require("fs"); const _dbgPayload = JSON.stringify({sessionId:"217b4f",location:"transaction.controllers.js:getTransactionsByCustomer",message:"received request",data:{customerId,looksLikeObjectId:/^[a-f0-9]{24}$/.test(customerId||""),transaction_type,page,limit},timestamp:Date.now(),runId:"run1",hypothesisId:"A-C-E"})+"\n"; try{fs.appendFileSync("/Users/ashinamanulla/Desktop/Project/CBS/khedmah loyalty/.cursor/debug-217b4f.log",_dbgPayload);}catch(_){}
+    // #endregion
+
+    // Cast customerId string to ObjectId for safe use in both find() and aggregate()
+    let customerObjectId;
+    try {
+      customerObjectId = new mongoose.Types.ObjectId(customerId);
+    } catch (castErr) {
+      // #region agent log
+      const _castErrPayload = JSON.stringify({sessionId:"217b4f",location:"transaction.controllers.js:ObjectId-cast",message:"ObjectId cast FAILED",data:{customerId,error:castErr.message},timestamp:Date.now(),runId:"run1",hypothesisId:"E"})+"\n"; try{require("fs").appendFileSync("/Users/ashinamanulla/Desktop/Project/CBS/khedmah loyalty/.cursor/debug-217b4f.log",_castErrPayload);}catch(_){}
+      // #endregion
+      return res.status(400).json({ status: 400, message: "Invalid customer ID format" });
+    }
+
+    // Build filter object — use ObjectId for reliable matching in find() AND aggregate()
+    const filter = { customer_id: customerObjectId };
 
     if (transaction_type) filter.transaction_type = transaction_type;
     if (source) filter.source = source;
@@ -205,8 +220,6 @@ const getTransactionsByCustomer = async (req, res) => {
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit))
-      .populate("trigger_event", "name description")
-      .populate("trigger_service", "title description")
       .populate("point_criteria")
       .populate("app_type", "name description");
 
@@ -217,7 +230,7 @@ const getTransactionsByCustomer = async (req, res) => {
     const pointsEarned = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           points: { $gt: 0 },
           status: "completed",
         },
@@ -229,7 +242,7 @@ const getTransactionsByCustomer = async (req, res) => {
     const pointsSpent = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           points: { $lt: 0 },
           transaction_type: "redeem",
           status: "completed",
@@ -242,7 +255,7 @@ const getTransactionsByCustomer = async (req, res) => {
     const pointsExpired = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           points: { $lt: 0 },
           transaction_type: "expire",
           status: "completed",
@@ -255,7 +268,7 @@ const getTransactionsByCustomer = async (req, res) => {
     const pointsAdjusted = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           transaction_type: "adjust",
           status: "completed",
         },
@@ -283,7 +296,7 @@ const getTransactionsByCustomer = async (req, res) => {
     const expiringPoints = await LoyaltyPoints.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           expiryDate: {
             $gt: currentDate,
             $lt: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
@@ -295,6 +308,10 @@ const getTransactionsByCustomer = async (req, res) => {
 
     const pointsExpiringIn30Days =
       expiringPoints.length > 0 ? expiringPoints[0].total : 0;
+
+    // #region agent log
+    const _respPayload = JSON.stringify({sessionId:"217b4f",location:"transaction.controllers.js:getTransactionsByCustomer-response",message:"sending response",data:{txCount:transactions.length,totalTransactions,currentBalance,totalEarned,totalSpent},timestamp:Date.now(),runId:"run1",hypothesisId:"C"})+"\n"; try{require("fs").appendFileSync("/Users/ashinamanulla/Desktop/Project/CBS/khedmah loyalty/.cursor/debug-217b4f.log",_respPayload);}catch(_){}
+    // #endregion
 
     return res.status(200).json({
       status: 200,
@@ -365,12 +382,14 @@ const updateTransactionStatus = async (req, res) => {
 const getCustomerPointBalance = async (req, res) => {
   try {
     const { customerId } = req.params;
+    let customerObjectId;
+    try { customerObjectId = new mongoose.Types.ObjectId(customerId); } catch { return res.status(400).json({ status: 400, message: "Invalid customer ID format" }); }
 
     // Calculate points earned (all positive point transactions that are completed)
     const pointsEarned = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           points: { $gt: 0 },
           status: "completed",
         },
@@ -380,7 +399,7 @@ const getCustomerPointBalance = async (req, res) => {
 
     // Calculate points spent (negative point transactions from redemptions that are completed)
     const pointsSpent = await Transaction.aggregate([
-      { $match: { customer_id: customerId, points: { $lt: 0 } } },
+      { $match: { customer_id: customerObjectId, points: { $lt: 0 } } },
       { $group: { _id: null, total: { $sum: "$points" } } },
     ]);
 
@@ -388,7 +407,7 @@ const getCustomerPointBalance = async (req, res) => {
     const pointsExpired = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           points: { $lt: 0 },
           transaction_type: "expire",
           status: "completed",
@@ -401,7 +420,7 @@ const getCustomerPointBalance = async (req, res) => {
     const pointsAdjusted = await Transaction.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           transaction_type: "adjust",
           status: "completed",
         },
@@ -429,7 +448,7 @@ const getCustomerPointBalance = async (req, res) => {
     const expiringPoints = await LoyaltyPoints.aggregate([
       {
         $match: {
-          customer_id: customerId,
+          customer_id: customerObjectId,
           expiryDate: {
             $gt: currentDate,
             $lt: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
@@ -442,9 +461,9 @@ const getCustomerPointBalance = async (req, res) => {
     const pointsExpiringIn30Days =
       expiringPoints.length > 0 ? expiringPoints[0].total : 0;
 
-    // Get recent transactions
+    // Get recent transactions (find() auto-casts but use ObjectId for consistency)
     const recentTransactions = await Transaction.find({
-      customer_id: customerId,
+      customer_id: customerObjectId,
     })
       .sort({ transaction_date: -1 })
       .limit(5)
