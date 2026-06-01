@@ -179,18 +179,11 @@ const getTransactionsByCustomer = async (req, res) => {
       sort_order = "desc",
     } = req.query;
 
-    // #region agent log
-    const fs = require("fs"); const _dbgPayload = JSON.stringify({sessionId:"217b4f",location:"transaction.controllers.js:getTransactionsByCustomer",message:"received request",data:{customerId,looksLikeObjectId:/^[a-f0-9]{24}$/.test(customerId||""),transaction_type,page,limit},timestamp:Date.now(),runId:"run1",hypothesisId:"A-C-E"})+"\n"; try{fs.appendFileSync("/Users/ashinamanulla/Desktop/Project/CBS/khedmah loyalty/.cursor/debug-217b4f.log",_dbgPayload);}catch(_){}
-    // #endregion
-
     // Cast customerId string to ObjectId for safe use in both find() and aggregate()
     let customerObjectId;
     try {
       customerObjectId = new mongoose.Types.ObjectId(customerId);
     } catch (castErr) {
-      // #region agent log
-      const _castErrPayload = JSON.stringify({sessionId:"217b4f",location:"transaction.controllers.js:ObjectId-cast",message:"ObjectId cast FAILED",data:{customerId,error:castErr.message},timestamp:Date.now(),runId:"run1",hypothesisId:"E"})+"\n"; try{require("fs").appendFileSync("/Users/ashinamanulla/Desktop/Project/CBS/khedmah loyalty/.cursor/debug-217b4f.log",_castErrPayload);}catch(_){}
-      // #endregion
       return res.status(400).json({ status: 400, message: "Invalid customer ID format" });
     }
 
@@ -308,10 +301,6 @@ const getTransactionsByCustomer = async (req, res) => {
 
     const pointsExpiringIn30Days =
       expiringPoints.length > 0 ? expiringPoints[0].total : 0;
-
-    // #region agent log
-    const _respPayload = JSON.stringify({sessionId:"217b4f",location:"transaction.controllers.js:getTransactionsByCustomer-response",message:"sending response",data:{txCount:transactions.length,totalTransactions,currentBalance,totalEarned,totalSpent},timestamp:Date.now(),runId:"run1",hypothesisId:"C"})+"\n"; try{require("fs").appendFileSync("/Users/ashinamanulla/Desktop/Project/CBS/khedmah loyalty/.cursor/debug-217b4f.log",_respPayload);}catch(_){}
-    // #endregion
 
     return res.status(200).json({
       status: 200,
