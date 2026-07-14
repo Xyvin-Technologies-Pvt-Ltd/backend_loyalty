@@ -837,7 +837,352 @@ const updateTransactionAppTypes = async (req, res) => {
   }
 };
 
+// CSV export configuration
+const EXPORT_BATCH_SIZE = 500;
+const MAX_EXPORT_ROWS = 100000;
+
+const formatDate = (date) => {
+  if (!date) return "";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
+const escapeCSVValue = (value) => {
+  const stringValue = String(value);
+  if (
+    stringValue.includes(",") ||
+    stringValue.includes('"') ||
+    stringValue.includes("\n")
+  ) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+  return stringValue;
+};
+
+const deriveTxType = (transaction) => {
+  if (transaction.transaction_type === "adjust") {
+    const id = transaction.transaction_id || "";
+    if (/_cancelled$/.test(id)) return "redemption_cancellation";
+    if (/^PROMO-/.test(id)) return "promotion";
+    if (/^ADMIN-/.test(id)) return "admin_reduction";
+    return "adjust";
+  }
+  return transaction.transaction_type || "";
+};
+
+const formatTransactionRow = (transaction, expiryDate) => {
+  let criteriaCodes = "";
+  if (transaction.metadata?.items && Array.isArray(transaction.metadata.items)) {
+    criteriaCodes = transaction.metadata.items
+      .map((item) => item.criteria_code)
+      .filter((code) => code)
+      .join(", ");
+  }
+
+  const row = [
+    transaction.customer_data?.customer_id || "",
+    transaction.tier_data?.name?.en || "",
+    transaction._id.toString(),
+    transaction.transaction_id || "",
+    transaction.metadata?.original_transaction_id || "",
+    deriveTxType(transaction),
+    transaction.points || 0,
+    criteriaCodes,
+    transaction.metadata?.requested_by || "",
+    formatDate(transaction.transaction_date),
+    formatDate(transaction.createdAt),
+    formatDate(expiryDate),
+    transaction.status || "",
+  ];
+
+  return row.map(escapeCSVValue).join(",");
+};
+
+const getTransactionExportCount = async (req, res) => {
+  try {
+    let { startDate, endDate } = req.query;
+
+    const now = new Date();
+    if (!startDate) {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else {
+      startDate = new Date(startDate);
+    }
+
+    if (!endDate) {
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    } else {
+      endDate = new Date(endDate);
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    startDate.setHours(0, 0, 0, 0);
+
+    const count = await Transaction.countDocuments({
+      transaction_date: { $gte: startDate, $lte: endDate },
+    });
+
+    const exceedsLimit = count > MAX_EXPORT_ROWS;
+    let suggestedEndDate = null;
+
+    if (exceedsLimit) {
+      try {
+        const hundredThousandthTransaction = await Transaction.findOne(
+          {
+            transaction_date: { $gte: startDate, $lte: endDate },
+          },
+          { createdAt: 1 },
+          {
+            sort: { createdAt: 1 },
+            skip: MAX_EXPORT_ROWS - 1,
+          }
+        ).lean();
+
+        if (hundredThousandthTransaction?.createdAt) {
+          const safeEndDate = new Date(hundredThousandthTransaction.createdAt);
+          safeEndDate.setDate(safeEndDate.getDate() - 1);
+          safeEndDate.setHours(23, 59, 59, 999);
+
+          if (safeEndDate >= startDate && safeEndDate < endDate) {
+            suggestedEndDate = safeEndDate.toISOString();
+          }
+        }
+      } catch (findError) {
+        logger.error(`Error finding 100k transaction: ${findError.message}`, {
+          stack: findError.stack,
+        });
+      }
+    }
+
+    return response_handler(res, 200, "Transaction count retrieved successfully", {
+      count,
+      maxExportRows: MAX_EXPORT_ROWS,
+      exceedsLimit,
+      suggestedEndDate,
+      dateRange: {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error getting transaction count: ${error.message}`, {
+      stack: error.stack,
+    });
+    return response_handler(res, 500, "Failed to get transaction count", error.message);
+  }
+};
+
+const exportTransactionReport = async (req, res) => {
+  try {
+    let { startDate, endDate, limit } = req.query;
+
+    const now = new Date();
+    if (!startDate) {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else {
+      startDate = new Date(startDate);
+    }
+
+    if (!endDate) {
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    } else {
+      endDate = new Date(endDate);
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    startDate.setHours(0, 0, 0, 0);
+
+    const exportLimit = limit
+      ? Math.min(parseInt(limit, 10), MAX_EXPORT_ROWS)
+      : MAX_EXPORT_ROWS;
+
+    const LoyaltyPoints = require("../../models/loyalty_points_model");
+
+    const headers = [
+      "kedmah_customer_id",
+      "customer_tier",
+      "loyalty_transaction_id",
+      "khedmah_transaction_id",
+      "cancel_transaction_id",
+      "transaction_type",
+      "point",
+      "criteria_code",
+      "requested_by",
+      "transaction_date",
+      "created_date",
+      "expirydate",
+      "status",
+    ];
+
+    res.setHeader("Content-Type", "text/csv;charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=transaction_report_${startDate.toISOString().split("T")[0]}_${endDate.toISOString().split("T")[0]}.csv`
+    );
+    res.setHeader("Transfer-Encoding", "chunked");
+
+    res.write(headers.join(",") + "\n");
+
+    const pipeline = [
+      {
+        $match: {
+          transaction_date: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer_id",
+          foreignField: "_id",
+          as: "customer_data",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customer_data",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: "tiers",
+          localField: "customer_data.tier",
+          foreignField: "_id",
+          as: "tier_data",
+        },
+      },
+      {
+        $unwind: {
+          path: "$tier_data",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          transaction_id: 1,
+          transaction_type: 1,
+          points: 1,
+          status: 1,
+          transaction_date: 1,
+          createdAt: 1,
+          metadata: 1,
+          "customer_data.customer_id": 1,
+          "tier_data.name": 1,
+        },
+      },
+      {
+        $sort: { transaction_date: 1 },
+      },
+      {
+        $limit: exportLimit,
+      },
+    ];
+
+    const cursor = Transaction.aggregate(pipeline)
+      .allowDiskUse(true)
+      .cursor({ batchSize: EXPORT_BATCH_SIZE });
+
+    let processedCount = 0;
+    let batch = [];
+    let expiryMap = {};
+
+    logger.info(`Starting transaction export stream`, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      limit: exportLimit,
+    });
+
+    const processBatch = async (transactions) => {
+      const batchIds = transactions
+        .map((t) => {
+          if (!t._id) return null;
+          if (t._id instanceof mongoose.Types.ObjectId) {
+            return t._id;
+          }
+          if (mongoose.Types.ObjectId.isValid(t._id)) {
+            return new mongoose.Types.ObjectId(t._id);
+          }
+          return null;
+        })
+        .filter((id) => id !== null);
+
+      if (batchIds.length > 0) {
+        const loyaltyPoints = await LoyaltyPoints.find(
+          { transaction_id: { $in: batchIds } },
+          { transaction_id: 1, expiryDate: 1 }
+        ).lean();
+
+        loyaltyPoints.forEach((lp) => {
+          expiryMap[lp.transaction_id.toString()] = lp.expiryDate;
+        });
+      }
+
+      for (const txn of transactions) {
+        try {
+          const expiryDate = expiryMap[txn._id.toString()];
+          const row = formatTransactionRow(txn, expiryDate);
+          res.write(row + "\n");
+          processedCount++;
+        } catch (rowError) {
+          logger.error(`Error processing transaction row: ${rowError.message}`, {
+            transactionId: txn._id,
+          });
+        }
+      }
+    };
+
+    for await (const transaction of cursor) {
+      batch.push(transaction);
+
+      if (batch.length >= EXPORT_BATCH_SIZE) {
+        await processBatch(batch);
+        batch = [];
+        expiryMap = {};
+
+        if (processedCount % 5000 === 0) {
+          logger.info(`Export progress: ${processedCount} transactions processed`);
+        }
+      }
+    }
+
+    if (batch.length > 0) {
+      await processBatch(batch);
+    }
+
+    logger.info(`Transaction export completed: ${processedCount} rows exported`, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+    });
+
+    res.end();
+  } catch (error) {
+    logger.error(`Error exporting transaction report: ${error.message}`, {
+      stack: error.stack,
+      error: error,
+    });
+
+    if (res.headersSent) {
+      res.write(`\n# ERROR: Export failed - ${error.message}\n`);
+      return res.end();
+    }
+
+    return response_handler(
+      res,
+      500,
+      "Failed to export transaction report",
+      error.message
+    );
+  }
+};
+
 module.exports = {
   generatePointsReport,
   updateTransactionAppTypes,
+  getTransactionExportCount,
+  exportTransactionReport,
 };
