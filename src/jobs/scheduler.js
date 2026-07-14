@@ -3,6 +3,9 @@ const moment = require("moment-timezone");
 const { processExpiredPoints } = require("./point_expiry_checker.job");
 const { processTierDowngrades } = require("./tier_downgrade.job");
 const { generateFocus9DailySummary } = require("./focus9_daily_summary.job");
+const {
+  pushUnsyncedFocus9Summaries,
+} = require("../services/focus9_sql_sync.service");
 
 const OMAN_TIMEZONE = "Asia/Muscat";
 const SCHEDULED_HOUR = 2; // 2 AM
@@ -101,6 +104,28 @@ function scheduleNow(job, jobType = "manual") {
   job(jobType);
 }
 
+async function runFocus9DailySummaryAndSync(jobType = "daily") {
+  await generateFocus9DailySummary(jobType);
+
+  try {
+    await pushUnsyncedFocus9Summaries();
+  } catch (error) {
+    logger.error(`Error pushing Focus9 summaries to SQL: ${error.message}`, {
+      stack: error.stack,
+    });
+  }
+}
+
+async function runFocus9SqlSyncRetry(jobType = "retry") {
+  try {
+    await pushUnsyncedFocus9Summaries();
+  } catch (error) {
+    logger.error(`Error in Focus9 SQL sync retry: ${error.message}`, {
+      stack: error.stack,
+    });
+  }
+}
+
 
 function initializeScheduledJobs() {
   try {
@@ -112,10 +137,16 @@ function initializeScheduledJobs() {
       `Point expiry checker scheduled to run daily at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     );
 
-    // Schedule Focus9 daily summary to run daily at 11:59 PM Oman time
-    scheduleDaily(generateFocus9DailySummary, 23, 59, "daily");
+    // Schedule Focus9 daily summary + SQL push at 11:59 PM Oman time
+    scheduleDaily(runFocus9DailySummaryAndSync, 23, 59, "daily");
     logger.info(
-      `Focus9 daily summary scheduled to run daily at 23:59 PM Oman time`
+      `Focus9 daily summary and SQL sync scheduled to run daily at 23:59 PM Oman time`
+    );
+
+    // Retry unsynced Focus9 SQL pushes daily at 3:00 AM Oman time
+    scheduleDaily(runFocus9SqlSyncRetry, 3, 0, "retry");
+    logger.info(
+      `Focus9 SQL sync retry scheduled to run daily at 03:00 AM Oman time`
     );
 
  

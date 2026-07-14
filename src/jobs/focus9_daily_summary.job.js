@@ -53,6 +53,33 @@ function normalizeRequestedBy(requestedBy) {
 }
 
 /**
+ * Detect redeem-cancellation adjust transactions
+ */
+function isRedeemCancellation(transaction) {
+  return Boolean(
+    transaction.metadata?.cancellation_triggered_by ||
+      (transaction.transaction_id &&
+        String(transaction.transaction_id).endsWith("_cancelled"))
+  );
+}
+
+/**
+ * Apply an OMR amount to the correct App/Delivery bucket on the summary object
+ */
+function applyAmountToBucket(summary, requestedBy, fieldPrefix, omrAmount) {
+  if (requestedBy === "Khedmah App") {
+    summary[`khedmah_app_${fieldPrefix}`] += omrAmount;
+    summary.khedmahAppCount++;
+  } else if (requestedBy === "Khedmah Delivery") {
+    summary[`khedmah_delivery_${fieldPrefix}`] += omrAmount;
+    summary.khedmahDeliveryCount++;
+  } else {
+    summary.otherCount++;
+    summary[`khedmah_app_${fieldPrefix}`] += omrAmount;
+  }
+}
+
+/**
  * Generate daily summary for Focus9 integration
  * Aggregates all transactions (additions, expirations, redemptions) for the day
  * and groups them by Khedmah App and Khedmah Delivery
@@ -98,7 +125,7 @@ async function generateFocus9DailySummary(jobType = "daily") {
     const dailyTransactions = await Transaction.find({
       transaction_date: { $gte: startOfDay, $lte: endOfDay },
       status: "completed",
-      transaction_type: { $in: ["earn", "expire", "redeem"] },
+      transaction_type: { $in: ["earn", "expire", "redeem", "adjust"] },
     }).lean();
 
     logger.info(`Found ${dailyTransactions.length} transactions to process`);
@@ -111,6 +138,12 @@ async function generateFocus9DailySummary(jobType = "daily") {
       khedmah_delivery_addition_amt: 0,
       khedmah_delivery_expired_amt: 0,
       khedmah_delivery_redeemed_amt: 0,
+      khedmah_app_redeem_cancellation_amt: 0,
+      khedmah_delivery_redeem_cancellation_amt: 0,
+      khedmah_app_manual_addition_amt: 0,
+      khedmah_delivery_manual_addition_amt: 0,
+      khedmah_app_manual_reduction_amt: 0,
+      khedmah_delivery_manual_reduction_amt: 0,
       total_transactions_processed: dailyTransactions.length,
       khedmahAppCount: 0,
       khedmahDeliveryCount: 0,
@@ -125,6 +158,32 @@ async function generateFocus9DailySummary(jobType = "daily") {
       const points = transaction.points;
       const transactionType = transaction.transaction_type;
       const omrAmount = pointsToOMR(points);
+
+      if (transactionType === "adjust") {
+        if (isRedeemCancellation(transaction)) {
+          applyAmountToBucket(
+            summary,
+            requestedBy,
+            "redeem_cancellation_amt",
+            omrAmount
+          );
+        } else if (points > 0) {
+          applyAmountToBucket(
+            summary,
+            requestedBy,
+            "manual_addition_amt",
+            omrAmount
+          );
+        } else if (points < 0) {
+          applyAmountToBucket(
+            summary,
+            requestedBy,
+            "manual_reduction_amt",
+            omrAmount
+          );
+        }
+        continue;
+      }
 
       // Determine which category this transaction belongs to
       if (requestedBy === "Khedmah App") {
@@ -189,9 +248,30 @@ async function generateFocus9DailySummary(jobType = "daily") {
         khedmah_delivery_redeemed_amt: roundToThreeDecimals(
           summary.khedmah_delivery_redeemed_amt
         ),
-        posting_flag: 0, // Start with 0, Focus9 will update to 1 after reading
+        khedmah_app_redeem_cancellation_amt: roundToThreeDecimals(
+          summary.khedmah_app_redeem_cancellation_amt
+        ),
+        khedmah_delivery_redeem_cancellation_amt: roundToThreeDecimals(
+          summary.khedmah_delivery_redeem_cancellation_amt
+        ),
+        khedmah_app_manual_addition_amt: roundToThreeDecimals(
+          summary.khedmah_app_manual_addition_amt
+        ),
+        khedmah_delivery_manual_addition_amt: roundToThreeDecimals(
+          summary.khedmah_delivery_manual_addition_amt
+        ),
+        khedmah_app_manual_reduction_amt: roundToThreeDecimals(
+          summary.khedmah_app_manual_reduction_amt
+        ),
+        khedmah_delivery_manual_reduction_amt: roundToThreeDecimals(
+          summary.khedmah_delivery_manual_reduction_amt
+        ),
+        posting_flag: 0,
         total_transactions_processed: summary.total_transactions_processed,
         summary_generated_at: new Date(),
+        sql_synced: false,
+        sql_synced_at: null,
+        sql_sync_error: null,
       },
       {
         upsert: true,
@@ -219,11 +299,17 @@ async function generateFocus9DailySummary(jobType = "daily") {
         addition: summary.khedmah_app_addition_amt,
         expired: summary.khedmah_app_expired_amt,
         redeemed: summary.khedmah_app_redeemed_amt,
+        redeemCancellation: summary.khedmah_app_redeem_cancellation_amt,
+        manualAddition: summary.khedmah_app_manual_addition_amt,
+        manualReduction: summary.khedmah_app_manual_reduction_amt,
       },
       khedmahDelivery: {
         addition: summary.khedmah_delivery_addition_amt,
         expired: summary.khedmah_delivery_expired_amt,
         redeemed: summary.khedmah_delivery_redeemed_amt,
+        redeemCancellation: summary.khedmah_delivery_redeem_cancellation_amt,
+        manualAddition: summary.khedmah_delivery_manual_addition_amt,
+        manualReduction: summary.khedmah_delivery_manual_reduction_amt,
       },
     };
 
@@ -240,11 +326,17 @@ async function generateFocus9DailySummary(jobType = "daily") {
             addition: summary.khedmah_app_addition_amt,
             expired: summary.khedmah_app_expired_amt,
             redeemed: summary.khedmah_app_redeemed_amt,
+            redeemCancellation: summary.khedmah_app_redeem_cancellation_amt,
+            manualAddition: summary.khedmah_app_manual_addition_amt,
+            manualReduction: summary.khedmah_app_manual_reduction_amt,
           },
           khedmahDelivery: {
             addition: summary.khedmah_delivery_addition_amt,
             expired: summary.khedmah_delivery_expired_amt,
             redeemed: summary.khedmah_delivery_redeemed_amt,
+            redeemCancellation: summary.khedmah_delivery_redeem_cancellation_amt,
+            manualAddition: summary.khedmah_delivery_manual_addition_amt,
+            manualReduction: summary.khedmah_delivery_manual_reduction_amt,
           },
         },
       }

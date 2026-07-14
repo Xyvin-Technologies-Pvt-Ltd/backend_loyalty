@@ -38,6 +38,36 @@ const focus9DailySummarySchema = new mongoose.Schema(
       default: 0,
       required: true,
     },
+    khedmah_app_redeem_cancellation_amt: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    khedmah_delivery_redeem_cancellation_amt: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    khedmah_app_manual_addition_amt: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    khedmah_delivery_manual_addition_amt: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    khedmah_app_manual_reduction_amt: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    khedmah_delivery_manual_reduction_amt: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
     posting_flag: {
       type: Number,
       default: 0,
@@ -55,6 +85,18 @@ const focus9DailySummarySchema = new mongoose.Schema(
       default: Date.now,
       required: true,
     },
+    sql_synced: {
+      type: Boolean,
+      default: false,
+    },
+    sql_synced_at: {
+      type: Date,
+      default: null,
+    },
+    sql_sync_error: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );
@@ -62,6 +104,7 @@ const focus9DailySummarySchema = new mongoose.Schema(
 // Indexes for faster queries
 focus9DailySummarySchema.index({ date: 1 }, { unique: true });
 focus9DailySummarySchema.index({ posting_flag: 1 });
+focus9DailySummarySchema.index({ sql_synced: 1 });
 focus9DailySummarySchema.index({ createdAt: -1 });
 
 const Focus9DailySummary = mongoose.model(
