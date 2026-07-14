@@ -90,6 +90,87 @@ function buildRows(summary) {
   ];
 }
 
+async function testSqlConnection() {
+  const status = {
+    enabled: FOCUS_SQL_ENABLED,
+    configured: isFocusSqlConfigured(),
+    host: FOCUS_SQL_HOST || null,
+    port: FOCUS_SQL_PORT || null,
+    database: FOCUS_SQL_DATABASE || null,
+    table: FOCUS_SQL_TABLE,
+    connected: false,
+    error: null,
+  };
+
+  if (!FOCUS_SQL_ENABLED) {
+    status.error = "FOCUS_SQL_ENABLED is false";
+    return status;
+  }
+
+  if (!isFocusSqlConfigured()) {
+    status.error = "SQL connection details are incomplete";
+    return status;
+  }
+
+  try {
+    const pool = await getPool();
+    await pool.request().query("SELECT 1 AS ok");
+    status.connected = true;
+  } catch (error) {
+    poolPromise = null;
+    status.error = error.message;
+  }
+
+  return status;
+}
+
+async function fetchSqlTableData(limit = 50) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
+  const pool = await getPool();
+  const request = pool.request();
+  request.input("limit", sql.Int, safeLimit);
+
+  const result = await request.query(`
+    SELECT TOP (@limit)
+      iTransactionId,
+      TransactionDate,
+      TransactionType,
+      AdditionAmount,
+      ExpiryAmount,
+      RedemptionAmount,
+      RedemptionCancel,
+      ManualAddition,
+      ManualDeduction,
+      PostedStatus
+    FROM ${FOCUS_SQL_TABLE}
+    ORDER BY iTransactionId DESC
+  `);
+
+  return {
+    rows: result.recordset,
+    count: result.recordset.length,
+    limit: safeLimit,
+  };
+}
+
+async function getMongoSyncStatus() {
+  const unsyncedSummaries = await Focus9DailySummary.find({ sql_synced: false })
+    .sort({ date: -1 })
+    .select("date sql_sync_error total_transactions_processed summary_generated_at")
+    .lean();
+
+  const latestSynced = await Focus9DailySummary.findOne({ sql_synced: true })
+    .sort({ sql_synced_at: -1 })
+    .select("date sql_synced_at")
+    .lean();
+
+  return {
+    unsyncedCount: unsyncedSummaries.length,
+    unsyncedSummaries,
+    latestSynced,
+  };
+}
+
 async function insertRows(transaction, rows) {
   const insertQuery = `
     INSERT INTO ${FOCUS_SQL_TABLE} (
@@ -245,6 +326,9 @@ async function closePool() {
 
 module.exports = {
   buildRows,
+  testSqlConnection,
+  fetchSqlTableData,
+  getMongoSyncStatus,
   pushSummary,
   pushUnsyncedFocus9Summaries,
   closePool,
