@@ -535,6 +535,7 @@ const formatTransactionRow = (transaction, expiryDate) => {
 
     const row = [
         transaction.customer_data?.customer_id || "",
+        transaction.tier_data?.name?.en || "",
         transaction._id.toString(),
         transaction.transaction_id || "",
         transaction.metadata?.original_transaction_id || "",
@@ -677,6 +678,7 @@ const exportTransactionReport = async (req, res) => {
         // CSV headers
         const headers = [
             "kedmah_customer_id",
+            "customer_tier",
             "loyalty_transaction_id",
             "khedmah_transaction_id",
             "cancel_transaction_id",
@@ -723,6 +725,20 @@ const exportTransactionReport = async (req, res) => {
                 },
             },
             {
+                $lookup: {
+                    from: "tiers",
+                    localField: "customer_data.tier",
+                    foreignField: "_id",
+                    as: "tier_data",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$tier_data",
+                    preserveNullAndEmptyArrays: true,
+                },
+            },
+            {
                 $project: {
                     _id: 1,
                     transaction_id: 1,
@@ -733,6 +749,7 @@ const exportTransactionReport = async (req, res) => {
                     createdAt: 1,
                     metadata: 1,
                     "customer_data.customer_id": 1,
+                    "tier_data.name": 1,
                 },
             },
             {
