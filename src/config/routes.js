@@ -48,6 +48,7 @@ const payment_method_routes = require("../modules/payment_method/payment_method.
 const upload_routes = require("../modules/upload/upload.routes");
 const dashboard_routes = require("../modules/dashboard/dashboard.routes");
 const reports_routes = require("../modules/reports/reports.routes");
+const focus9_routes = require("../modules/focus9/focus9.routes");
 
 //new-kedmah-sdk-route 
 const new_kedmah_sdk_routes = require("../modules/new_kedmah_sdk/new_kedmah_sdk.routes");
@@ -131,6 +132,7 @@ function registerRoutes(app, basePath) {
   app.use(`${basePath}/customer-support`, customer_support_routes);
   app.use(`${basePath}/dashboard`, dashboard_routes);
   app.use(`${basePath}/reports`, reports_routes);
+  app.use(`${basePath}/focus9`, focus9_routes);
 
   // Theme settings routes
   app.use(`${basePath}/theme-settings`, themeSettingsRoutes);
