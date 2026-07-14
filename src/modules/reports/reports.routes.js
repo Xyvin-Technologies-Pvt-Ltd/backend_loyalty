@@ -3,6 +3,8 @@ const router = express.Router();
 const {
   generatePointsReport,
   updateTransactionAppTypes,
+  getTransactionExportCount,
+  exportTransactionReport,
 } = require("./reports.controller");
 const { authorizePermission } = require("../../middlewares/auth/auth");
 const { createAuditMiddleware } = require("../audit");
@@ -44,6 +46,25 @@ router.post(
     targetModel: "Transaction",
   }),
   updateTransactionAppTypes
+);
+
+const reportsTimeout = (req, res, next) => {
+  req.setTimeout(0);
+  res.setTimeout(0);
+  next();
+};
+
+router.get(
+  "/transaction-export/count",
+  authorizePermission(["VIEW_REPORTS", "EXPORT_REPORTS"]),
+  getTransactionExportCount
+);
+
+router.get(
+  "/transaction-export",
+  authorizePermission(["VIEW_REPORTS", "EXPORT_REPORTS"]),
+  reportsTimeout,
+  exportTransactionReport
 );
 
 module.exports = router;
