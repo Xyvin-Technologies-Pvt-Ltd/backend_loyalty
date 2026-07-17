@@ -80,6 +80,79 @@ function applyAmountToBucket(summary, requestedBy, fieldPrefix, omrAmount) {
 }
 
 /**
+ * Build lookup maps for original transactions (expire/adjust source resolution)
+ */
+async function buildOriginalTransactionLookups(transactions) {
+  const referenceIds = [
+    ...new Set(
+      transactions
+        .filter((tx) => tx.transaction_type === "expire" && tx.reference_id)
+        .map((tx) => String(tx.reference_id))
+    ),
+  ];
+
+  const originalTxIds = [
+    ...new Set(
+      transactions
+        .filter(
+          (tx) =>
+            tx.transaction_type === "adjust" &&
+            tx.metadata?.original_transaction_id
+        )
+        .map((tx) => tx.metadata.original_transaction_id)
+    ),
+  ];
+
+  const originalById = new Map();
+  const originalByTxId = new Map();
+
+  if (referenceIds.length) {
+    const originals = await Transaction.find({ _id: { $in: referenceIds } })
+      .select("metadata.requested_by")
+      .lean();
+    for (const doc of originals) {
+      originalById.set(String(doc._id), doc);
+    }
+  }
+
+  if (originalTxIds.length) {
+    const originals = await Transaction.find({
+      transaction_id: { $in: originalTxIds },
+    })
+      .select("transaction_id metadata.requested_by")
+      .lean();
+    for (const doc of originals) {
+      originalByTxId.set(doc.transaction_id, doc);
+    }
+  }
+
+  return { originalById, originalByTxId };
+}
+
+/**
+ * Resolve requested_by using original transaction for expire/adjust rows
+ */
+function resolveEffectiveRequestedBy(transaction, originalById, originalByTxId) {
+  const transactionType = transaction.transaction_type;
+
+  if (transactionType === "expire" && transaction.reference_id) {
+    const original = originalById.get(String(transaction.reference_id));
+    if (original?.metadata?.requested_by) {
+      return original.metadata.requested_by;
+    }
+  }
+
+  if (transactionType === "adjust" && transaction.metadata?.original_transaction_id) {
+    const original = originalByTxId.get(transaction.metadata.original_transaction_id);
+    if (original?.metadata?.requested_by) {
+      return original.metadata.requested_by;
+    }
+  }
+
+  return transaction.metadata?.requested_by ?? null;
+}
+
+/**
  * Generate daily summary for Focus9 integration
  * Aggregates all transactions (additions, expirations, redemptions) for the day
  * and groups them by Khedmah App and Khedmah Delivery
@@ -130,6 +203,9 @@ async function generateFocus9DailySummary(jobType = "daily") {
 
     logger.info(`Found ${dailyTransactions.length} transactions to process`);
 
+    const { originalById, originalByTxId } =
+      await buildOriginalTransactionLookups(dailyTransactions);
+
     // Initialize summary object
     const summary = {
       khedmah_app_addition_amt: 0,
@@ -152,8 +228,8 @@ async function generateFocus9DailySummary(jobType = "daily") {
 
     // Process each transaction
     for (const transaction of dailyTransactions) {
-      const requestedBy = normalizeRequestedBy(
-        transaction.metadata?.requested_by
+      const effectiveRequestedBy = normalizeRequestedBy(
+        resolveEffectiveRequestedBy(transaction, originalById, originalByTxId)
       );
       const points = transaction.points;
       const transactionType = transaction.transaction_type;
@@ -163,21 +239,21 @@ async function generateFocus9DailySummary(jobType = "daily") {
         if (isRedeemCancellation(transaction)) {
           applyAmountToBucket(
             summary,
-            requestedBy,
+            effectiveRequestedBy,
             "redeem_cancellation_amt",
             omrAmount
           );
         } else if (points > 0) {
           applyAmountToBucket(
             summary,
-            requestedBy,
+            effectiveRequestedBy,
             "manual_addition_amt",
             omrAmount
           );
         } else if (points < 0) {
           applyAmountToBucket(
             summary,
-            requestedBy,
+            effectiveRequestedBy,
             "manual_reduction_amt",
             omrAmount
           );
@@ -186,7 +262,7 @@ async function generateFocus9DailySummary(jobType = "daily") {
       }
 
       // Determine which category this transaction belongs to
-      if (requestedBy === "Khedmah App") {
+      if (effectiveRequestedBy === "Khedmah App") {
         summary.khedmahAppCount++;
 
         if (transactionType === "earn") {
@@ -196,7 +272,7 @@ async function generateFocus9DailySummary(jobType = "daily") {
         } else if (transactionType === "redeem") {
           summary.khedmah_app_redeemed_amt += omrAmount;
         }
-      } else if (requestedBy === "Khedmah Delivery") {
+      } else if (effectiveRequestedBy === "Khedmah Delivery") {
         summary.khedmahDeliveryCount++;
 
         if (transactionType === "earn") {

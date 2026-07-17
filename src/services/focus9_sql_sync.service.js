@@ -2,6 +2,7 @@ const sql = require("mssql");
 const Focus9DailySummary = require("../models/focus9_daily_summary_model");
 const { logger } = require("../middlewares/logger");
 const {
+  NODE_ENV,
   FOCUS_SQL_ENABLED,
   FOCUS_SQL_HOST,
   FOCUS_SQL_PORT,
@@ -61,8 +62,13 @@ function getPool() {
   return poolPromise;
 }
 
+function mapPostingFlagToPostedStatus(postingFlag) {
+  return postingFlag === 1 ? "Y" : "N";
+}
+
 function buildRows(summary) {
   const transactionDate = summary.date;
+  const postedStatus = mapPostingFlagToPostedStatus(summary.posting_flag);
 
   return [
     {
@@ -74,7 +80,7 @@ function buildRows(summary) {
       RedemptionCancel: summary.khedmah_app_redeem_cancellation_amt || 0,
       ManualAddition: summary.khedmah_app_manual_addition_amt || 0,
       ManualDeduction: summary.khedmah_app_manual_reduction_amt || 0,
-      PostedStatus: 0,
+      PostedStatus: postedStatus,
     },
     {
       TransactionDate: transactionDate,
@@ -85,7 +91,7 @@ function buildRows(summary) {
       RedemptionCancel: summary.khedmah_delivery_redeem_cancellation_amt || 0,
       ManualAddition: summary.khedmah_delivery_manual_addition_amt || 0,
       ManualDeduction: summary.khedmah_delivery_manual_reduction_amt || 0,
-      PostedStatus: 0,
+      PostedStatus: postedStatus,
     },
   ];
 }
@@ -99,6 +105,7 @@ async function testSqlConnection() {
     database: FOCUS_SQL_DATABASE || null,
     table: FOCUS_SQL_TABLE,
     connected: false,
+    deleteEnabled: NODE_ENV !== "production",
     error: null,
   };
 
@@ -206,10 +213,26 @@ async function insertRows(transaction, rows) {
     request.input("RedemptionCancel", sql.Decimal(18, 3), row.RedemptionCancel);
     request.input("ManualAddition", sql.Decimal(18, 3), row.ManualAddition);
     request.input("ManualDeduction", sql.Decimal(18, 3), row.ManualDeduction);
-    request.input("PostedStatus", sql.Int, row.PostedStatus);
+    request.input("PostedStatus", sql.VarChar(1), row.PostedStatus);
 
     await request.query(insertQuery);
   }
+}
+
+async function deleteSqlRow(iTransactionId) {
+  const pool = await getPool();
+  const request = pool.request();
+  request.input("id", sql.Int, iTransactionId);
+
+  const result = await request.query(`
+    DELETE FROM ${FOCUS_SQL_TABLE}
+    WHERE iTransactionId = @id
+  `);
+
+  return {
+    deleted: result.rowsAffected?.[0] ?? 0,
+    iTransactionId,
+  };
 }
 
 async function pushSummary(summary) {
@@ -326,9 +349,11 @@ async function closePool() {
 
 module.exports = {
   buildRows,
+  mapPostingFlagToPostedStatus,
   testSqlConnection,
   fetchSqlTableData,
   getMongoSyncStatus,
+  deleteSqlRow,
   pushSummary,
   pushUnsyncedFocus9Summaries,
   closePool,
