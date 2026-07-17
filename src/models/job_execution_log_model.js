@@ -11,7 +11,7 @@ const jobExecutionLogSchema = new mongoose.Schema(
     },
     jobType: {
       type: String,
-      enum: ["daily", "monthly", "manual"],
+      enum: ["daily", "monthly", "manual", "backfill"],
       required: true,
       index: true,
     },
