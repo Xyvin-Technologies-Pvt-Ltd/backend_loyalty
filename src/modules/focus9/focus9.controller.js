@@ -8,6 +8,7 @@ const {
   fetchSqlTableData,
   getMongoSyncStatus,
   deleteSqlRow,
+  isFocusSqlDeleteEnabled,
 } = require("../../services/focus9_sql_sync.service");
 
 async function triggerFocus9Summary(req, res) {
@@ -118,11 +119,11 @@ async function getFocus9SqlData(req, res) {
 }
 
 async function deleteFocus9SqlRow(req, res) {
-  if (NODE_ENV === "production") {
+  if (!isFocusSqlDeleteEnabled()) {
     return response_handler(
       res,
       403,
-      "Deleting FOCUS SQL rows is disabled in production"
+      "Deleting FOCUS SQL rows is disabled in this environment"
     );
   }
 

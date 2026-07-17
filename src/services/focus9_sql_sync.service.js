@@ -16,6 +16,18 @@ const {
 
 let poolPromise = null;
 
+function isFocusSqlDeleteEnabled() {
+  const explicit = process.env.FOCUS_SQL_DELETE_ENABLED;
+  if (explicit === "true") return true;
+  if (explicit === "false") return false;
+
+  const deployEnv = (process.env.IMAGE_SERVER_ENV || "").toUpperCase();
+  if (deployEnv === "UAT") return true;
+  if (deployEnv === "PROD") return false;
+
+  return NODE_ENV !== "production";
+}
+
 function isFocusSqlConfigured() {
   return Boolean(
     FOCUS_SQL_HOST &&
@@ -105,7 +117,7 @@ async function testSqlConnection() {
     database: FOCUS_SQL_DATABASE || null,
     table: FOCUS_SQL_TABLE,
     connected: false,
-    deleteEnabled: NODE_ENV !== "production",
+    deleteEnabled: isFocusSqlDeleteEnabled(),
     error: null,
   };
 
@@ -354,6 +366,7 @@ module.exports = {
   fetchSqlTableData,
   getMongoSyncStatus,
   deleteSqlRow,
+  isFocusSqlDeleteEnabled,
   pushSummary,
   pushUnsyncedFocus9Summaries,
   closePool,
