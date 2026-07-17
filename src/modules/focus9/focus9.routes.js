@@ -7,6 +7,8 @@ const {
   triggerFocus9SummaryAndSync,
   getFocus9SqlStatus,
   getFocus9SqlData,
+  getFocus9MongoData,
+  triggerFocus9Backfill,
   deleteFocus9SqlRow,
 } = require("./focus9.controller");
 
@@ -20,6 +22,12 @@ router.get(
   "/sql-data",
   authorizePermission("MANAGE_SETTINGS"),
   getFocus9SqlData
+);
+
+router.get(
+  "/mongo-data",
+  authorizePermission("MANAGE_SETTINGS"),
+  getFocus9MongoData
 );
 
 router.delete(
@@ -44,6 +52,12 @@ router.post(
   "/generate-and-sync",
   authorizePermission("MANAGE_SETTINGS"),
   triggerFocus9SummaryAndSync
+);
+
+router.post(
+  "/backfill",
+  authorizePermission("MANAGE_SETTINGS"),
+  triggerFocus9Backfill
 );
 
 module.exports = router;

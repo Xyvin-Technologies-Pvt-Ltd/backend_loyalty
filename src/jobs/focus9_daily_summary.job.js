@@ -158,7 +158,7 @@ function resolveEffectiveRequestedBy(transaction, originalById, originalByTxId) 
  * and groups them by Khedmah App and Khedmah Delivery
  * Runs daily at 11:59 PM Oman time
  */
-async function generateFocus9DailySummary(jobType = "daily") {
+async function generateFocus9DailySummary(jobType = "daily", targetDate = null) {
   const startedAt = new Date();
   let executionLog = null;
 
@@ -181,8 +181,10 @@ async function generateFocus9DailySummary(jobType = "daily") {
       executionLogId: executionLog._id,
     });
 
-    // Get the current date in Oman timezone (start of day)
-    const now = moment().tz(OMAN_TIMEZONE);
+    // Get the target date in Oman timezone (start of day)
+    const now = targetDate
+      ? moment.tz(targetDate, "YYYY-MM-DD", OMAN_TIMEZONE)
+      : moment().tz(OMAN_TIMEZONE);
     const startOfDay = now.clone().startOf("day").toDate();
     const endOfDay = now.clone().endOf("day").toDate();
 

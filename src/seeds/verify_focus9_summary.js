@@ -288,7 +288,7 @@ function buildSqlPreviewRows(stored) {
       TransactionType: "Khedmah App",
       AdditionAmount: stored.khedmah_app_addition_amt || 0,
       ExpiryAmount: stored.khedmah_app_expired_amt || 0,
-      RedemptionAmount: 0,
+      RedemptionAmount: stored.khedmah_app_redeemed_amt || 0,
       RedemptionCancel: stored.khedmah_app_redeem_cancellation_amt || 0,
       ManualAddition: stored.khedmah_app_manual_addition_amt || 0,
       ManualDeduction: stored.khedmah_app_manual_reduction_amt || 0,
@@ -433,9 +433,6 @@ async function verifyFocus9Summary() {
   if (sqlRows.length) {
     console.log("\n--- SQL rows that would be pushed ---");
     console.log(JSON.stringify(sqlRows, null, 2));
-    console.log(
-      "\nNote: App RedemptionAmount is hardcoded to 0 in SQL push (by design)."
-    );
     console.log(
       `Stored Mongo khedmah_app_redeemed_amt: ${stored?.khedmah_app_redeemed_amt ?? "N/A"}`
     );
