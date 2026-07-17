@@ -88,7 +88,7 @@ function buildRows(summary) {
       TransactionType: "Khedmah App",
       AdditionAmount: summary.khedmah_app_addition_amt || 0,
       ExpiryAmount: summary.khedmah_app_expired_amt || 0,
-      RedemptionAmount: 0,
+      RedemptionAmount: summary.khedmah_app_redeemed_amt || 0,
       RedemptionCancel: summary.khedmah_app_redeem_cancellation_amt || 0,
       ManualAddition: summary.khedmah_app_manual_addition_amt || 0,
       ManualDeduction: summary.khedmah_app_manual_reduction_amt || 0,
@@ -247,6 +247,57 @@ async function deleteSqlRow(iTransactionId) {
   };
 }
 
+async function deleteSqlRowsByDateRange(startDate, endDate) {
+  const pool = await getPool();
+  const request = pool.request();
+  request.input("start", sql.DateTime, startDate);
+  request.input("end", sql.DateTime, endDate);
+
+  const result = await request.query(`
+    DELETE FROM ${FOCUS_SQL_TABLE}
+    WHERE TransactionDate >= @start AND TransactionDate <= @end
+  `);
+
+  return {
+    deleted: result.rowsAffected?.[0] ?? 0,
+    startDate,
+    endDate,
+  };
+}
+
+async function fetchMongoSummaryData(limit = 50) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
+  const summaryLimit = Math.max(Math.ceil(safeLimit / 2), 1);
+
+  const summaries = await Focus9DailySummary.find()
+    .sort({ date: -1 })
+    .limit(summaryLimit)
+    .lean();
+
+  const rows = [];
+
+  for (const summary of summaries) {
+    const builtRows = buildRows(summary);
+    for (const row of builtRows) {
+      rows.push({
+        ...row,
+        summaryId: summary._id,
+        sql_synced: summary.sql_synced,
+        sql_synced_at: summary.sql_synced_at,
+        sql_sync_error: summary.sql_sync_error,
+        total_transactions_processed: summary.total_transactions_processed,
+        summary_generated_at: summary.summary_generated_at,
+      });
+    }
+  }
+
+  return {
+    rows: rows.slice(0, safeLimit),
+    count: Math.min(rows.length, safeLimit),
+    limit: safeLimit,
+  };
+}
+
 async function pushSummary(summary) {
   const pool = await getPool();
   const rows = buildRows(summary);
@@ -366,6 +417,8 @@ module.exports = {
   fetchSqlTableData,
   getMongoSyncStatus,
   deleteSqlRow,
+  deleteSqlRowsByDateRange,
+  fetchMongoSummaryData,
   isFocusSqlDeleteEnabled,
   pushSummary,
   pushUnsyncedFocus9Summaries,

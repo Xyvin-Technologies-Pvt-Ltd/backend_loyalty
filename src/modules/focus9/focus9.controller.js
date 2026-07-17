@@ -1,7 +1,7 @@
 const response_handler = require("../../helpers/response_handler");
 const { logger } = require("../../middlewares/logger");
-const { NODE_ENV } = require("../../config/env");
 const { generateFocus9DailySummary } = require("../../jobs/focus9_daily_summary.job");
+const { runFocus9Backfill } = require("../../seeds/backfill_focus9_summaries");
 const {
   pushUnsyncedFocus9Summaries,
   testSqlConnection,
@@ -9,6 +9,7 @@ const {
   getMongoSyncStatus,
   deleteSqlRow,
   isFocusSqlDeleteEnabled,
+  fetchMongoSummaryData,
 } = require("../../services/focus9_sql_sync.service");
 
 async function triggerFocus9Summary(req, res) {
@@ -118,6 +119,44 @@ async function getFocus9SqlData(req, res) {
   }
 }
 
+async function triggerFocus9Backfill(req, res) {
+  try {
+    const { from, to, skipSql } = req.body || {};
+
+    if (!from) {
+      return response_handler(res, 400, "from date is required (YYYY-MM-DD)");
+    }
+
+    const result = await runFocus9Backfill({
+      from,
+      to: to || undefined,
+      skipSql: Boolean(skipSql),
+    });
+
+    return response_handler(res, 200, "Focus9 backfill completed", result);
+  } catch (error) {
+    logger.error(`Focus9 backfill failed: ${error.message}`, {
+      stack: error.stack,
+      body: req.body,
+    });
+    return response_handler(res, 500, "Failed to run Focus9 backfill", error.message);
+  }
+}
+
+async function getFocus9MongoData(req, res) {
+  try {
+    const limit = req.query.limit || 50;
+    const mongoData = await fetchMongoSummaryData(limit);
+
+    return response_handler(res, 200, "Focus9 Mongo summary data fetched", mongoData);
+  } catch (error) {
+    logger.error(`Focus9 Mongo data fetch failed: ${error.message}`, {
+      stack: error.stack,
+    });
+    return response_handler(res, 500, "Failed to fetch Focus9 Mongo summary data", error.message);
+  }
+}
+
 async function deleteFocus9SqlRow(req, res) {
   if (!isFocusSqlDeleteEnabled()) {
     return response_handler(
@@ -162,5 +201,7 @@ module.exports = {
   triggerFocus9SummaryAndSync,
   getFocus9SqlStatus,
   getFocus9SqlData,
+  getFocus9MongoData,
+  triggerFocus9Backfill,
   deleteFocus9SqlRow,
 };
