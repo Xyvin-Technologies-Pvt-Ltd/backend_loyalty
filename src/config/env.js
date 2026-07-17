@@ -37,4 +37,7 @@ module.exports = {
     FOCUS_SQL_TABLE: process.env.FOCUS_SQL_TABLE || 'dbo.TblLoyaltyPoints',
     FOCUS_SQL_ENCRYPT: process.env.FOCUS_SQL_ENCRYPT === 'true',
     FOCUS_SQL_TRUST_SERVER_CERT: process.env.FOCUS_SQL_TRUST_SERVER_CERT !== 'false',
+    // UAT-only FOCUS SQL row delete (optional override; otherwise uses IMAGE_SERVER_ENV)
+    FOCUS_SQL_DELETE_ENABLED: process.env.FOCUS_SQL_DELETE_ENABLED,
+    IMAGE_SERVER_ENV: process.env.IMAGE_SERVER_ENV,
 }; 
