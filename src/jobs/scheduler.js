@@ -1,5 +1,6 @@
 const { logger } = require("../middlewares/logger");
 const moment = require("moment-timezone");
+const { FOCUS_CRON_ENABLED } = require("../config/env");
 const { processExpiredPoints } = require("./point_expiry_checker.job");
 const { processTierDowngrades } = require("./tier_downgrade.job");
 const { generateFocus9DailySummary } = require("./focus9_daily_summary.job");
@@ -138,16 +139,20 @@ function initializeScheduledJobs() {
     );
 
     // Schedule Focus9 daily summary + SQL push at 11:59 PM Oman time
-    scheduleDaily(runFocus9DailySummaryAndSync, 23, 59, "daily");
-    logger.info(
-      `Focus9 daily summary and SQL sync scheduled to run daily at 23:59 PM Oman time`
-    );
+    if (FOCUS_CRON_ENABLED) {
+      scheduleDaily(runFocus9DailySummaryAndSync, 23, 59, "daily");
+      logger.info(
+        `Focus9 daily summary and SQL sync scheduled to run daily at 23:59 PM Oman time`
+      );
 
-    // Retry unsynced Focus9 SQL pushes daily at 3:00 AM Oman time
-    scheduleDaily(runFocus9SqlSyncRetry, 3, 0, "retry");
-    logger.info(
-      `Focus9 SQL sync retry scheduled to run daily at 03:00 AM Oman time`
-    );
+      // Retry unsynced Focus9 SQL pushes daily at 3:00 AM Oman time
+      scheduleDaily(runFocus9SqlSyncRetry, 3, 0, "retry");
+      logger.info(
+        `Focus9 SQL sync retry scheduled to run daily at 03:00 AM Oman time`
+      );
+    } else {
+      logger.info("Focus9 cron jobs disabled — FOCUS_CRON_ENABLED is false");
+    }
 
  
 

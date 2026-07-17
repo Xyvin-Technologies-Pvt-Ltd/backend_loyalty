@@ -28,6 +28,7 @@ module.exports = {
     SWAGGER_SUPER_ADMIN_TOKEN: process.env.SWAGGER_SUPER_ADMIN_TOKEN,
 
     // FOCUS SQL Server integration
+    FOCUS_CRON_ENABLED: process.env.FOCUS_CRON_ENABLED !== 'false',
     FOCUS_SQL_ENABLED: process.env.FOCUS_SQL_ENABLED === 'true',
     FOCUS_SQL_HOST: process.env.FOCUS_SQL_HOST,
     FOCUS_SQL_PORT: parseInt(process.env.FOCUS_SQL_PORT || '1433', 10),
