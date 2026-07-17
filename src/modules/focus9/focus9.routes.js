@@ -7,6 +7,7 @@ const {
   triggerFocus9SummaryAndSync,
   getFocus9SqlStatus,
   getFocus9SqlData,
+  deleteFocus9SqlRow,
 } = require("./focus9.controller");
 
 router.get(
@@ -19,6 +20,12 @@ router.get(
   "/sql-data",
   authorizePermission("MANAGE_SETTINGS"),
   getFocus9SqlData
+);
+
+router.delete(
+  "/sql-data/:id",
+  authorizePermission("MANAGE_SETTINGS"),
+  deleteFocus9SqlRow
 );
 
 router.post(
