@@ -30,10 +30,6 @@ const getReportData = async (req, res) => {
             ? moment.tz(endDate, "YYYY-MM-DD", OMAN_TIMEZONE).endOf("day").toDate()
             : nowOman.clone().endOf("month").toDate();
 
-        // #region agent log
-        fetch('http://127.0.0.1:7431/ingest/98cfb3b4-06e5-4a3f-9c66-5eb7ccae209c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67e7bc'},body:JSON.stringify({sessionId:'67e7bc',hypothesisId:'H1',location:'reports.controller.js:34',message:'Summary report date window',data:{rawStart:String(req.query.startDate),rawEnd:String(req.query.endDate),serverTZOffsetMin:new Date().getTimezoneOffset(),startISO:startDate.toISOString(),endISO:endDate.toISOString()},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-
         // Fetch all app types
         const appTypes = await AppType.find({ isActive: true }).sort({ name: 1 });
 
@@ -324,10 +320,6 @@ const getReportData = async (req, res) => {
                     },
                 ]),
             ]);
-
-            // #region agent log
-            fetch('http://127.0.0.1:7431/ingest/98cfb3b4-06e5-4a3f-9c66-5eb7ccae209c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67e7bc'},body:JSON.stringify({sessionId:'67e7bc',hypothesisId:'H1',location:'reports.controller.js:326',message:'App type report figures (points)',data:{appTypeName,earn:earnStatsResult[0]?.totalPoints||0,redeem:redeemStatsResult[0]?.totalPoints||0,expired:expiredPointsResult[0]?.totalPoints||0,opening:appTypeOpeningBalanceResult[0]?.total||0,closing:appTypeClosingBalanceResult[0]?.total||0},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
 
             return {
                 appTypeName,
