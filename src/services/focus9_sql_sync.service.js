@@ -1,6 +1,18 @@
 const sql = require("mssql");
+const moment = require("moment-timezone");
 const Focus9DailySummary = require("../models/focus9_daily_summary_model");
 const { logger } = require("../middlewares/logger");
+
+const OMAN_TIMEZONE = "Asia/Muscat";
+
+// The Mongo summary `date` is Oman midnight expressed in UTC (e.g. the 19-Jul
+// Oman business day is stored as 2026-07-18T20:00:00Z). Sending that raw instant
+// makes SQL record the previous UTC calendar date. Convert to the Oman calendar
+// day (at UTC midnight) so FOCUS's TransactionDate reflects the correct day.
+function toOmanCalendarDate(date) {
+  const dayStr = moment(date).tz(OMAN_TIMEZONE).format("YYYY-MM-DD");
+  return new Date(`${dayStr}T00:00:00.000Z`);
+}
 const {
   NODE_ENV,
   FOCUS_SQL_ENABLED,
@@ -81,7 +93,7 @@ function mapPostingFlagToPostedStatus(postingFlag) {
 }
 
 function buildRows(summary) {
-  const transactionDate = summary.date;
+  const transactionDate = toOmanCalendarDate(summary.date);
   const postedStatus = mapPostingFlagToPostedStatus(summary.posting_flag);
 
   return [
