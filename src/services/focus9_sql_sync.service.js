@@ -74,8 +74,10 @@ function getPool() {
   return poolPromise;
 }
 
+// FOCUS confirmed PostedStatus is an integer flag: 0 = not posted, 1 = posted
+// (see FOCUS_SQL_INTEGRATION_QUESTIONNAIRE §1.6). Loyalty inserts 0 on new rows.
 function mapPostingFlagToPostedStatus(postingFlag) {
-  return postingFlag === 1 ? "Y" : "N";
+  return postingFlag === 1 ? 1 : 0;
 }
 
 function buildRows(summary) {
@@ -225,7 +227,7 @@ async function insertRows(transaction, rows) {
     request.input("RedemptionCancel", sql.Decimal(18, 3), row.RedemptionCancel);
     request.input("ManualAddition", sql.Decimal(18, 3), row.ManualAddition);
     request.input("ManualDeduction", sql.Decimal(18, 3), row.ManualDeduction);
-    request.input("PostedStatus", sql.VarChar(1), row.PostedStatus);
+    request.input("PostedStatus", sql.Int, row.PostedStatus);
 
     await request.query(insertQuery);
   }
