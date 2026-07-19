@@ -4,6 +4,13 @@ const AppType = require("../../models/app_type_model");
 const { logger } = require("../../middlewares/logger");
 const response_handler = require("../../helpers/response_handler");
 const mongoose = require("mongoose");
+const moment = require("moment-timezone");
+
+// All report date windows are resolved in Oman time so they align with the
+// Focus9 daily summary (which also uses Asia/Muscat). Without this the window
+// falls back to server-local time (UTC in prod), shifting the day boundary by
+// ~4h and mis-attributing the 02:00-Oman expiry batch to the wrong calendar day.
+const OMAN_TIMEZONE = "Asia/Muscat";
 
 /**
  * Get report data for app types
@@ -14,23 +21,18 @@ const getReportData = async (req, res) => {
     try {
         let { startDate, endDate } = req.query;
 
-        // Set default to current month if not provided
-        const now = new Date();
-        if (!startDate) {
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        } else {
-            startDate = new Date(startDate);
-        }
+        // Resolve the date window in Oman time (defaults to the current Oman month).
+        const nowOman = moment().tz(OMAN_TIMEZONE);
+        startDate = startDate
+            ? moment.tz(startDate, "YYYY-MM-DD", OMAN_TIMEZONE).startOf("day").toDate()
+            : nowOman.clone().startOf("month").toDate();
+        endDate = endDate
+            ? moment.tz(endDate, "YYYY-MM-DD", OMAN_TIMEZONE).endOf("day").toDate()
+            : nowOman.clone().endOf("month").toDate();
 
-        if (!endDate) {
-            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-        } else {
-            endDate = new Date(endDate);
-            endDate.setHours(23, 59, 59, 999);
-        }
-
-        // Set start date to 00:00:00
-        startDate.setHours(0, 0, 0, 0);
+        // #region agent log
+        fetch('http://127.0.0.1:7431/ingest/98cfb3b4-06e5-4a3f-9c66-5eb7ccae209c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67e7bc'},body:JSON.stringify({sessionId:'67e7bc',hypothesisId:'H1',location:'reports.controller.js:34',message:'Summary report date window',data:{rawStart:String(req.query.startDate),rawEnd:String(req.query.endDate),serverTZOffsetMin:new Date().getTimezoneOffset(),startISO:startDate.toISOString(),endISO:endDate.toISOString()},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
 
         // Fetch all app types
         const appTypes = await AppType.find({ isActive: true }).sort({ name: 1 });
@@ -322,6 +324,10 @@ const getReportData = async (req, res) => {
                     },
                 ]),
             ]);
+
+            // #region agent log
+            fetch('http://127.0.0.1:7431/ingest/98cfb3b4-06e5-4a3f-9c66-5eb7ccae209c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67e7bc'},body:JSON.stringify({sessionId:'67e7bc',hypothesisId:'H1',location:'reports.controller.js:326',message:'App type report figures (points)',data:{appTypeName,earn:earnStatsResult[0]?.totalPoints||0,redeem:redeemStatsResult[0]?.totalPoints||0,expired:expiredPointsResult[0]?.totalPoints||0,opening:appTypeOpeningBalanceResult[0]?.total||0,closing:appTypeClosingBalanceResult[0]?.total||0},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
 
             return {
                 appTypeName,
