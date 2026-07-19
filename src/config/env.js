@@ -28,7 +28,15 @@ module.exports = {
     SWAGGER_SUPER_ADMIN_TOKEN: process.env.SWAGGER_SUPER_ADMIN_TOKEN,
 
     // FOCUS SQL Server integration
-    FOCUS_CRON_ENABLED: process.env.FOCUS_CRON_ENABLED !== 'false',
+    // UAT has no FOCUS SQL server — disable Focus9 cron by default there.
+    FOCUS_CRON_ENABLED: (() => {
+        const explicit = process.env.FOCUS_CRON_ENABLED;
+        if (explicit === 'true') return true;
+        if (explicit === 'false') return false;
+        const deployEnv = (process.env.IMAGE_SERVER_ENV || '').toUpperCase();
+        if (deployEnv === 'UAT') return false;
+        return true;
+    })(),
     FOCUS_SQL_ENABLED: process.env.FOCUS_SQL_ENABLED === 'true',
     FOCUS_SQL_HOST: process.env.FOCUS_SQL_HOST,
     FOCUS_SQL_PORT: parseInt(process.env.FOCUS_SQL_PORT || '1433', 10),
