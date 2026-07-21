@@ -137,10 +137,12 @@ function initializeScheduledJobs() {
       `Point expiry checker scheduled to run daily at ${SCHEDULED_HOUR}:${SCHEDULED_MINUTE.toString().padStart(2, "0")} AM Oman time`
     );
 
-    // Schedule Focus9 daily summary + SQL push at 11:59 PM Oman time
-    scheduleDaily(runFocus9DailySummaryAndSync, 23, 59, "daily");
+    // Schedule Focus9 daily summary + SQL push at 00:05 AM Oman time for the
+    // previous calendar day (job defaults to yesterday). Avoids missing earns in
+    // the final minute that occurred when the job ran at 23:59:00.
+    scheduleDaily(runFocus9DailySummaryAndSync, 0, 5, "daily");
     logger.info(
-      `Focus9 daily summary and SQL sync scheduled to run daily at 23:59 PM Oman time`
+      `Focus9 daily summary and SQL sync scheduled to run daily at 00:05 AM Oman time (previous day)`
     );
 
     // Retry unsynced Focus9 SQL pushes daily at 3:00 AM Oman time

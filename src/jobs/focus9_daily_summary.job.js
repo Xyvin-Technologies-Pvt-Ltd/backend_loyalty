@@ -156,7 +156,7 @@ function resolveEffectiveRequestedBy(transaction, originalById, originalByTxId) 
  * Generate daily summary for Focus9 integration
  * Aggregates all transactions (additions, expirations, redemptions) for the day
  * and groups them by Khedmah App and Khedmah Delivery
- * Runs daily at 11:59 PM Oman time
+ * Runs daily at 00:05 AM Oman time for the previous calendar day
  */
 async function generateFocus9DailySummary(jobType = "daily", targetDate = null) {
   const startedAt = new Date();
@@ -181,10 +181,12 @@ async function generateFocus9DailySummary(jobType = "daily", targetDate = null) 
       executionLogId: executionLog._id,
     });
 
-    // Get the target date in Oman timezone (start of day)
+    // Default (no targetDate): previous Oman calendar day.
+    // Scheduled after midnight so the full day is closed — running at 23:59
+    // previously missed earns in the final ~60s (e.g. 125 pts on 2026-07-20).
     const now = targetDate
       ? moment.tz(targetDate, "YYYY-MM-DD", OMAN_TIMEZONE)
-      : moment().tz(OMAN_TIMEZONE);
+      : moment().tz(OMAN_TIMEZONE).subtract(1, "day");
     const startOfDay = now.clone().startOf("day").toDate();
     const endOfDay = now.clone().endOf("day").toDate();
 
