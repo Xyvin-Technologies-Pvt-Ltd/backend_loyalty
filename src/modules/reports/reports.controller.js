@@ -13,6 +13,24 @@ const moment = require("moment-timezone");
 const OMAN_TIMEZONE = "Asia/Muscat";
 
 /**
+ * Resolve a YYYY-MM-DD report window into absolute instants using Oman day
+ * boundaries. Shared by the Summary Report and the Transaction Report so both
+ * always bucket a given calendar day identically.
+ * Falls back to the current Oman month when either bound is missing.
+ */
+const resolveOmanDateRange = (startDate, endDate) => {
+    const nowOman = moment().tz(OMAN_TIMEZONE);
+    return {
+        startDate: startDate
+            ? moment.tz(startDate, "YYYY-MM-DD", OMAN_TIMEZONE).startOf("day").toDate()
+            : nowOman.clone().startOf("month").toDate(),
+        endDate: endDate
+            ? moment.tz(endDate, "YYYY-MM-DD", OMAN_TIMEZONE).endOf("day").toDate()
+            : nowOman.clone().endOf("month").toDate(),
+    };
+};
+
+/**
  * Get report data for app types
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
@@ -22,13 +40,7 @@ const getReportData = async (req, res) => {
         let { startDate, endDate } = req.query;
 
         // Resolve the date window in Oman time (defaults to the current Oman month).
-        const nowOman = moment().tz(OMAN_TIMEZONE);
-        startDate = startDate
-            ? moment.tz(startDate, "YYYY-MM-DD", OMAN_TIMEZONE).startOf("day").toDate()
-            : nowOman.clone().startOf("month").toDate();
-        endDate = endDate
-            ? moment.tz(endDate, "YYYY-MM-DD", OMAN_TIMEZONE).endOf("day").toDate()
-            : nowOman.clone().endOf("month").toDate();
+        ({ startDate, endDate } = resolveOmanDateRange(startDate, endDate));
 
         // Fetch all app types
         const appTypes = await AppType.find({ isActive: true }).sort({ name: 1 });
@@ -475,16 +487,16 @@ const EXPORT_BATCH_SIZE = 500; // Process transactions in batches
 const MAX_EXPORT_ROWS = 100000; // Maximum rows for single export (safety limit)
 
 /**
- * Helper function to format date as dd mm yyyy
+ * Helper function to format date as dd mm yyyy in Oman time.
+ * Rendering in server-local time (UTC in prod) would print the previous
+ * calendar day for anything stamped between 00:00 and 04:00 Oman, which is
+ * exactly when the 02:00-Oman point expiry batch runs.
  */
 const formatDate = (date) => {
     if (!date) return "";
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return "";
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    return `${day} ${month} ${year}`;
+    const d = moment(date).tz(OMAN_TIMEZONE);
+    if (!d.isValid()) return "";
+    return d.format("DD MM YYYY");
 };
 
 /**
@@ -560,22 +572,7 @@ const getTransactionExportCount = async (req, res) => {
     try {
         let { startDate, endDate } = req.query;
 
-        // Set default to current month if not provided
-        const now = new Date();
-        if (!startDate) {
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        } else {
-            startDate = new Date(startDate);
-        }
-
-        if (!endDate) {
-            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-        } else {
-            endDate = new Date(endDate);
-            endDate.setHours(23, 59, 59, 999);
-        }
-
-        startDate.setHours(0, 0, 0, 0);
+        ({ startDate, endDate } = resolveOmanDateRange(startDate, endDate));
 
         const count = await Transaction.countDocuments({
             transaction_date: { $gte: startDate, $lte: endDate },
@@ -601,13 +598,13 @@ const getTransactionExportCount = async (req, res) => {
                 ).lean();
 
                 if (hundredThousandthTransaction && hundredThousandthTransaction.createdAt) {
-                    const hundredKDate = new Date(hundredThousandthTransaction.createdAt);
-
                     // Calculate safe end date: 100k transaction's createdAt date - 1 day
-                    // This ensures we get complete date ranges (full days)
-                    safeEndDate = new Date(hundredKDate);
-                    safeEndDate.setDate(safeEndDate.getDate() - 1);
-                    safeEndDate.setHours(23, 59, 59, 999);
+                    // This ensures we get complete Oman days.
+                    safeEndDate = moment(hundredThousandthTransaction.createdAt)
+                        .tz(OMAN_TIMEZONE)
+                        .subtract(1, "day")
+                        .endOf("day")
+                        .toDate();
 
                     // Only suggest if safe end date is different from original end date
                     // and is after or equal to start date
@@ -650,23 +647,9 @@ const exportTransactionReport = async (req, res) => {
     try {
         let { startDate, endDate, limit } = req.query;
 
-        // Set default to current month if not provided
-        const now = new Date();
-        if (!startDate) {
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        } else {
-            startDate = new Date(startDate);
-        }
-
-        if (!endDate) {
-            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-        } else {
-            endDate = new Date(endDate);
-            endDate.setHours(23, 59, 59, 999);
-        }
-
-        // Set start date to 00:00:00
-        startDate.setHours(0, 0, 0, 0);
+        // Same Oman-time window as the Summary Report, so both reports attribute
+        // a transaction to the same calendar day.
+        ({ startDate, endDate } = resolveOmanDateRange(startDate, endDate));
 
         // Parse and validate limit
         const exportLimit = limit ? Math.min(parseInt(limit, 10), MAX_EXPORT_ROWS) : MAX_EXPORT_ROWS;
@@ -694,7 +677,7 @@ const exportTransactionReport = async (req, res) => {
         res.setHeader("Content-Type", "text/csv;charset=utf-8");
         res.setHeader(
             "Content-Disposition",
-            `attachment; filename=transaction_report_${startDate.toISOString().split("T")[0]}_${endDate.toISOString().split("T")[0]}.csv`
+            `attachment; filename=transaction_report_${moment(startDate).tz(OMAN_TIMEZONE).format("YYYY-MM-DD")}_${moment(endDate).tz(OMAN_TIMEZONE).format("YYYY-MM-DD")}.csv`
         );
         res.setHeader("Transfer-Encoding", "chunked");
 
