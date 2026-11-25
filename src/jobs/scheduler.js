@@ -7,7 +7,7 @@ const {
   pushUnsyncedFocus9Summaries,
 } = require("../services/focus9_sql_sync.service");
 
-const OMAN_TIMEZONE = "Asia/Muscat";
+const { OMAN_TIMEZONE } = require("../utils/date");
 const SCHEDULED_HOUR = 2; // 2 AM
 const SCHEDULED_MINUTE = 0;
 

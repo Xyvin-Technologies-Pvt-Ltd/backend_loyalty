@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { omanMonthRange } = require("../utils/date");
 
 // Points Criteria Schema
 const pointsCriteriaSchema = new mongoose.Schema(
@@ -159,9 +160,11 @@ pointsCriteriaSchema.methods.checkTransactionLimits = function (
   const startOfWeek = new Date(now);
   startOfWeek.setDate(now.getDate() - 7);
 
-  // Calculate start of month (first day of current month)
-  const startOfMonth = new Date(now);
-  startOfMonth.setDate(1);
+  // Start of the current Oman month. The previous `new Date(now); setDate(1)`
+  // inherited the current time-of-day (so "this month" meant "since the 1st,
+  // at whatever time it is right now") and resolved the month boundary in
+  // server-local (UTC) time — both fixed by omanMonthRange.
+  const startOfMonth = omanMonthRange(now).start;
 
   // Count weekly and monthly transactions
   const weeklyTransactions = customerTransactions.filter(
@@ -220,8 +223,9 @@ pointsCriteriaSchema.methods.checkTransactionLimitsAggregated = async function (
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - 7);
 
-    const startOfMonth = new Date(now);
-    startOfMonth.setDate(1);
+    // Start of the current Oman month — see the note in checkTransactionLimits
+    // above for why this must not be `new Date(now); setDate(1)`.
+    const startOfMonth = omanMonthRange(now).start;
 
     // Use aggregation to get counts directly from database
     const Transaction = mongoose.model("Transaction");
@@ -488,8 +492,9 @@ pointsCriteriaSchema.methods.checkCriteriaUsageFromMetadata = async function (
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - 7);
 
-    const startOfMonth = new Date(now);
-    startOfMonth.setDate(1);
+    // Start of the current Oman month — see the note in checkTransactionLimits
+    // above for why this must not be `new Date(now); setDate(1)`.
+    const startOfMonth = omanMonthRange(now).start;
 
     const Transaction = mongoose.model("Transaction");
 

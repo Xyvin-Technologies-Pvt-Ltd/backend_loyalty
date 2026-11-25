@@ -3,7 +3,7 @@ const moment = require("moment-timezone");
 const Focus9DailySummary = require("../models/focus9_daily_summary_model");
 const { logger } = require("../middlewares/logger");
 
-const OMAN_TIMEZONE = "Asia/Muscat";
+const { OMAN_TIMEZONE } = require("../utils/date");
 
 // The Mongo summary `date` is Oman midnight expressed in UTC (e.g. the 19-Jul
 // Oman business day is stored as 2026-07-18T20:00:00Z). Sending that raw instant

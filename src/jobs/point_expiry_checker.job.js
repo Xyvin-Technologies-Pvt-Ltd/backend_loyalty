@@ -4,6 +4,7 @@ const Customer = require("../models/customer_model");
 const Transaction = require("../models/transaction_model");
 const JobExecutionLog = require("../models/job_execution_log_model");
 const { SafeTransaction } = require("../helpers/transaction");
+const { formatOmanDate } = require("../utils/date");
 
 /**
  * Process expired points and update customer balances
@@ -101,7 +102,10 @@ async function processExpiredPoints(jobType = "daily") {
                             points: -pointRecord.points,
                             transaction_id: `EXP-${originalTransaction.transaction_id}`,
                             status: "completed",
-                            note: `Points expired on ${now.toISOString()}`,
+                            // Oman-local date on the customer-visible note — a raw
+                            // ISO/UTC string reads as the wrong calendar day for
+                            // anything processed near the 02:00-Oman run time.
+                            note: `Points expired on ${formatOmanDate(now)}`,
                             reference_id: originalTransaction._id,
                             metadata: {
                                 requested_by: originalTransaction.metadata?.requested_by || null,

@@ -6,6 +6,7 @@ const TierEligibilityCriteria = require("../../models/tier_eligibility_criteria_
 const Customer = require("../../models/customer_model");
 const Transaction = require("../../models/transaction_model");
 const { SafeTransaction } = require("../../helpers/transaction");
+const { formatOmanDate } = require("../../utils/date");
 
 exports.create = async (req, res) => {
   try {
@@ -270,16 +271,11 @@ exports.getCustomerTierProgress = async (customerId, appType = null) => {
     // Format streak information
     const periodDetails = eligibilityResult.details.period_breakdown.map(
       (period, index) => {
-        // Format dates in a readable format
-        const startDate = new Date(period.start);
-        const endDate = new Date(period.end);
-
-        const startFormatted = `${startDate.getDate()}/${
-          startDate.getMonth() + 1
-        }/${startDate.getFullYear()}`;
-        const endFormatted = `${endDate.getDate()}/${
-          endDate.getMonth() + 1
-        }/${endDate.getFullYear()}`;
+        // Format dates in Oman time — local getters (getDate/getMonth/
+        // getFullYear) read server-local (UTC) time and can print the wrong
+        // day for a period boundary near midnight Oman.
+        const startFormatted = formatOmanDate(period.start, "D/M/YYYY");
+        const endFormatted = formatOmanDate(period.end, "D/M/YYYY");
 
         return {
           period_number: index + 1,

@@ -2,6 +2,7 @@ const LoyaltyPoints = require("../../../models/loyalty_points_model");
 const Transaction = require("../../../models/transaction_model");
 const response_handler = require("../../../helpers/response_handler");
 const { logger } = require("../../../middlewares/logger");
+const { OMAN_TIMEZONE, resolveOmanDateRange } = require("../../../utils/date");
 
 exports.getMyPointsHistory = async (req, res) => {
     try {
@@ -21,13 +22,17 @@ exports.getMyPointsHistory = async (req, res) => {
             query.status = status;
         }
         if (start_date || end_date) {
+            // Resolved as Oman day boundaries — a bare `new Date(...)` reads
+            // the boundary as UTC and, for end_date, silently excludes the
+            // entire final day (midnight UTC, not end of day).
+            const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+                start_date,
+                end_date,
+                { fallback: "none" }
+            );
             query.earnedAt = {};
-            if (start_date) {
-                query.earnedAt.$gte = new Date(start_date);
-            }
-            if (end_date) {
-                query.earnedAt.$lte = new Date(end_date);
-            }
+            if (gte) query.earnedAt.$gte = gte;
+            if (lte) query.earnedAt.$lte = lte;
         }
 
         // Calculate pagination
@@ -67,13 +72,14 @@ exports.getPointsSummary = async (req, res) => {
             customer_id: req.user._id
         };
         if (start_date || end_date) {
+            const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+                start_date,
+                end_date,
+                { fallback: "none" }
+            );
             dateQuery.earnedAt = {};
-            if (start_date) {
-                dateQuery.earnedAt.$gte = new Date(start_date);
-            }
-            if (end_date) {
-                dateQuery.earnedAt.$lte = new Date(end_date);
-            }
+            if (gte) dateQuery.earnedAt.$gte = gte;
+            if (lte) dateQuery.earnedAt.$lte = lte;
         }
 
         // Get points summary by status
@@ -126,7 +132,14 @@ exports.getPointsSummary = async (req, res) => {
             {
                 $group: {
                     _id: {
-                        $dateToString: { format: "%Y-%m", date: "$expiryDate" }
+                        // Grouped in Oman time — an expiry stamped just after
+                        // UTC midnight on the 1st can still be the previous
+                        // Oman month.
+                        $dateToString: {
+                            format: "%Y-%m",
+                            date: "$expiryDate",
+                            timezone: OMAN_TIMEZONE
+                        }
                     },
                     total_points: { $sum: "$points" },
                     count: { $sum: 1 }

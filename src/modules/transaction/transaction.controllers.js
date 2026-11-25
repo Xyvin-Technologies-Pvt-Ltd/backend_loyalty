@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const { logger } = require("../../middlewares/logger");
 const response_handler  = require("../../helpers/response_handler");
 const mongoose = require("mongoose");
+const { resolveOmanDateRange } = require("../../utils/date");
 
 const createTransaction = async (req, res) => {
   try {
@@ -87,11 +88,19 @@ const getAllTransactions = async (req, res) => {
     if (payment_method) filter.payment_method = payment_method;
     if (app_type) filter.app_type = app_type;
 
-    // Date range filter
+    // Date range filter — resolved as Oman day boundaries. A bare
+    // `new Date(...)` reads the boundary as UTC and, for end_date, is
+    // midnight UTC rather than end of day, silently dropping the whole
+    // final day of any selected range.
     if (start_date || end_date) {
+      const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+        start_date,
+        end_date,
+        { fallback: "none" }
+      );
       filter.transaction_date = {};
-      if (start_date) filter.transaction_date.$gte = new Date(start_date);
-      if (end_date) filter.transaction_date.$lte = new Date(end_date);
+      if (gte) filter.transaction_date.$gte = gte;
+      if (lte) filter.transaction_date.$lte = lte;
     }
 
     // Build sort object
@@ -194,11 +203,19 @@ const getTransactionsByCustomer = async (req, res) => {
     if (source) filter.source = source;
     if (status) filter.status = status;
 
-    // Date range filter
+    // Date range filter — resolved as Oman day boundaries. A bare
+    // `new Date(...)` reads the boundary as UTC and, for end_date, is
+    // midnight UTC rather than end of day, silently dropping the whole
+    // final day of any selected range.
     if (start_date || end_date) {
+      const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+        start_date,
+        end_date,
+        { fallback: "none" }
+      );
       filter.transaction_date = {};
-      if (start_date) filter.transaction_date.$gte = new Date(start_date);
-      if (end_date) filter.transaction_date.$lte = new Date(end_date);
+      if (gte) filter.transaction_date.$gte = gte;
+      if (lte) filter.transaction_date.$lte = lte;
     }
 
     // Build sort object

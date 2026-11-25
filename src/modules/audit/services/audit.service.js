@@ -6,6 +6,7 @@ const {
   isAuditEnabled,
   sanitizeAuditData,
 } = require("../../../config/audit");
+const { OMAN_TIMEZONE, resolveOmanDateRange } = require("../../../utils/date");
 
 /**
  * Queue for background processing of audit logs
@@ -451,15 +452,18 @@ class AuditService {
       if (filters.targetModel) query.targetModel = filters.targetModel;
       if (filters.requestId) query.requestId = filters.requestId;
 
-      // Date range filtering
+      // Date range filtering — resolved as Oman day boundaries so the last
+      // day of a selected range isn't silently dropped and the boundary
+      // matches the Oman business day, not UTC.
       if (filters.startDate || filters.endDate) {
+        const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+          filters.startDate,
+          filters.endDate,
+          { fallback: "none" }
+        );
         query.timestamp = {};
-        if (filters.startDate) {
-          query.timestamp.$gte = new Date(filters.startDate);
-        }
-        if (filters.endDate) {
-          query.timestamp.$lte = new Date(filters.endDate);
-        }
+        if (gte) query.timestamp.$gte = gte;
+        if (lte) query.timestamp.$lte = lte;
       }
 
       // Text search
@@ -510,15 +514,18 @@ class AuditService {
     try {
       const query = {};
 
-      // Date range filtering
+      // Date range filtering — resolved as Oman day boundaries so the last
+      // day of a selected range isn't silently dropped and the boundary
+      // matches the Oman business day, not UTC.
       if (filters.startDate || filters.endDate) {
+        const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+          filters.startDate,
+          filters.endDate,
+          { fallback: "none" }
+        );
         query.timestamp = {};
-        if (filters.startDate) {
-          query.timestamp.$gte = new Date(filters.startDate);
-        }
-        if (filters.endDate) {
-          query.timestamp.$lte = new Date(filters.endDate);
-        }
+        if (gte) query.timestamp.$gte = gte;
+        if (lte) query.timestamp.$lte = lte;
       }
 
       // Get counts by category
@@ -556,7 +563,13 @@ class AuditService {
         {
           $group: {
             _id: {
-              $dateToString: { format: "%Y-%m-%d", date: "$timestamp" },
+              // Grouped in Oman time so daily activity counts match the
+              // Oman business day, not UTC.
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$timestamp",
+                timezone: OMAN_TIMEZONE,
+              },
             },
             count: { $sum: 1 },
           },

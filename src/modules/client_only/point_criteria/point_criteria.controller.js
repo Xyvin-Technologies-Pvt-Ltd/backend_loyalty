@@ -4,6 +4,7 @@ const response_handler = require("../../../helpers/response_handler");
 const { logger } = require("../../../middlewares/logger");
 const loyaltyPointsController = require("../../loyalty_points_core/loyalty_points.controller");
 const Customer = require("../../../models/customer_model");
+const { omanMonthRange } = require("../../../utils/date");
 
 
 //process a loyalty point earning event from user based on trigger event, trigger service, app type , user tier, condition etc
@@ -211,8 +212,9 @@ exports.checkCustomerEligibility = async (req, res) => {
         const now = new Date();
         const startOfWeek = new Date(now);
         startOfWeek.setDate(now.getDate() - 7);
-        const startOfMonth = new Date(now);
-        startOfMonth.setDate(1);
+        // Start of the current Oman month — matches models/point_criteria_model.js,
+        // which independently computes the same limit and must agree with it.
+        const startOfMonth = omanMonthRange(now).start;
 
         const [weeklyTransactions, monthlyTransactions] = await Promise.all([
             Transaction.countDocuments({

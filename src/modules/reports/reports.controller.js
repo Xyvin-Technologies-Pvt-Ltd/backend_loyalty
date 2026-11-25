@@ -10,25 +10,13 @@ const moment = require("moment-timezone");
 // Focus9 daily summary (which also uses Asia/Muscat). Without this the window
 // falls back to server-local time (UTC in prod), shifting the day boundary by
 // ~4h and mis-attributing the 02:00-Oman expiry batch to the wrong calendar day.
-const OMAN_TIMEZONE = "Asia/Muscat";
-
-/**
- * Resolve a YYYY-MM-DD report window into absolute instants using Oman day
- * boundaries. Shared by the Summary Report and the Transaction Report so both
- * always bucket a given calendar day identically.
- * Falls back to the current Oman month when either bound is missing.
- */
-const resolveOmanDateRange = (startDate, endDate) => {
-    const nowOman = moment().tz(OMAN_TIMEZONE);
-    return {
-        startDate: startDate
-            ? moment.tz(startDate, "YYYY-MM-DD", OMAN_TIMEZONE).startOf("day").toDate()
-            : nowOman.clone().startOf("month").toDate(),
-        endDate: endDate
-            ? moment.tz(endDate, "YYYY-MM-DD", OMAN_TIMEZONE).endOf("day").toDate()
-            : nowOman.clone().endOf("month").toDate(),
-    };
-};
+//
+// resolveOmanDateRange is the shared, tested resolver in ../../utils/date.js —
+// used here by the Summary Report, the Offer Summary Report and the
+// Transaction Report so all three always bucket a given calendar day
+// identically. Do not redefine it locally; that duplication is exactly how
+// the summary and detailed reports drifted apart in the first place.
+const { OMAN_TIMEZONE, resolveOmanDateRange, formatOmanDate } = require("../../utils/date");
 
 /**
  * Get report data for app types
@@ -492,12 +480,7 @@ const MAX_EXPORT_ROWS = 100000; // Maximum rows for single export (safety limit)
  * calendar day for anything stamped between 00:00 and 04:00 Oman, which is
  * exactly when the 02:00-Oman point expiry batch runs.
  */
-const formatDate = (date) => {
-    if (!date) return "";
-    const d = moment(date).tz(OMAN_TIMEZONE);
-    if (!d.isValid()) return "";
-    return d.format("DD MM YYYY");
-};
+const formatDate = (date) => formatOmanDate(date, "DD MM YYYY", "");
 
 /**
  * Helper function to escape CSV values
@@ -1024,18 +1007,14 @@ const getOfferSummaryReport = async (req, res) => {
     try {
         let { startDate, endDate } = req.query;
 
-        const now = new Date();
-        let parsedStart = null;
-        let parsedEnd = null;
-
-        if (startDate) {
-            parsedStart = new Date(startDate);
-            parsedStart.setHours(0, 0, 0, 0);
-        }
-        if (endDate) {
-            parsedEnd = new Date(endDate);
-            parsedEnd.setHours(23, 59, 59, 999);
-        }
+        // Resolved in Oman time via the shared resolver — see the header note
+        // above. No default range when both bounds are omitted (this endpoint
+        // has never defaulted to "current month"), so fallback is disabled.
+        const { startDate: parsedStart, endDate: parsedEnd } = resolveOmanDateRange(
+            startDate,
+            endDate,
+            { fallback: "none" }
+        );
 
         const data = await buildOfferSummaryData(parsedStart, parsedEnd);
 
@@ -1064,17 +1043,12 @@ const exportOfferSummaryReport = async (req, res) => {
 
         let { startDate, endDate } = req.query;
 
-        let parsedStart = null;
-        let parsedEnd = null;
-
-        if (startDate) {
-            parsedStart = new Date(startDate);
-            parsedStart.setHours(0, 0, 0, 0);
-        }
-        if (endDate) {
-            parsedEnd = new Date(endDate);
-            parsedEnd.setHours(23, 59, 59, 999);
-        }
+        // Same Oman-time window as getOfferSummaryReport, via the shared resolver.
+        const { startDate: parsedStart, endDate: parsedEnd } = resolveOmanDateRange(
+            startDate,
+            endDate,
+            { fallback: "none" }
+        );
 
         const rows = await buildOfferSummaryData(parsedStart, parsedEnd);
 
@@ -1134,8 +1108,10 @@ const exportOfferSummaryReport = async (req, res) => {
 
         const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
+        // Oman-local date label so the filename matches the Oman day the admin
+        // actually selected, not the UTC day the instant falls on.
         const dateLabel = parsedStart
-            ? `${parsedStart.toISOString().split("T")[0]}_${parsedEnd ? parsedEnd.toISOString().split("T")[0] : "now"}`
+            ? `${formatOmanDate(parsedStart, "YYYY-MM-DD")}_${parsedEnd ? formatOmanDate(parsedEnd, "YYYY-MM-DD") : "now"}`
             : "all_time";
 
         res.setHeader(

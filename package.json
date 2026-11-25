@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
     "dev": "nodemon app.js",
     "start": "nodemon app.js",
     "seed": "node -e \"require('./src/helpers/connection'); require('./src/seeds/index')();\""
@@ -19,6 +19,9 @@
   },
   "homepage": "https://github.com/hello-world-ttj/loyalty-backend#readme",
   "description": "",
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.775.0",
     "@aws-sdk/s3-request-presigner": "^3.775.0",

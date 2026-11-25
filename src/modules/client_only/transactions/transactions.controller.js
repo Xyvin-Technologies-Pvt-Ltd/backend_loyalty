@@ -1,6 +1,7 @@
 const Transaction = require("../../../models/transaction_model");
 const response_handler = require("../../../helpers/response_handler");
 const { logger } = require("../../../middlewares/logger");
+const { resolveOmanDateRange } = require("../../../utils/date");
 
 exports.getMyTransactions = async (req, res) => {
     try {
@@ -24,13 +25,14 @@ exports.getMyTransactions = async (req, res) => {
             query.status = status;
         }
         if (start_date || end_date) {
+            const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+                start_date,
+                end_date,
+                { fallback: "none" }
+            );
             query.transaction_date = {};
-            if (start_date) {
-                query.transaction_date.$gte = new Date(start_date);
-            }
-            if (end_date) {
-                query.transaction_date.$lte = new Date(end_date);
-            }
+            if (gte) query.transaction_date.$gte = gte;
+            if (lte) query.transaction_date.$lte = lte;
         }
 
         // Calculate pagination
@@ -112,13 +114,14 @@ exports.getTransactionSummary = async (req, res) => {
             customer_id: req.user._id
         };
         if (start_date || end_date) {
+            const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+                start_date,
+                end_date,
+                { fallback: "none" }
+            );
             dateQuery.transaction_date = {};
-            if (start_date) {
-                dateQuery.transaction_date.$gte = new Date(start_date);
-            }
-            if (end_date) {
-                dateQuery.transaction_date.$lte = new Date(end_date);
-            }
+            if (gte) dateQuery.transaction_date.$gte = gte;
+            if (lte) dateQuery.transaction_date.$lte = lte;
         }
 
         // Get summary by transaction type

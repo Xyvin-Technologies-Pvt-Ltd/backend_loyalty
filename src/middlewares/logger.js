@@ -2,6 +2,8 @@ const winston = require("winston");
 const { format, transports } = winston;
 const fs = require("fs");
 const path = require("path");
+const moment = require("moment-timezone");
+const { OMAN_TIMEZONE } = require("../utils/date");
 
 //? Ensure logs directory exists
 const logDir = "logs";
@@ -11,7 +13,11 @@ if (!fs.existsSync(logDir)) {
 
 //? Define custom log formats
 const log_format = format.combine(
-  format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
+  // Oman-local timestamps so log lines can be correlated against Oman
+  // business-day boundaries (e.g. the 02:00-Oman expiry run) without a
+  // mental UTC+4 offset. A function form is required — a plain format
+  // string here would render in server-local (UTC) time.
+  format.timestamp({ format: () => moment().tz(OMAN_TIMEZONE).format("YYYY-MM-DD HH:mm:ss") }),
   format.printf(({ timestamp, level, message }) => {
     return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
   })

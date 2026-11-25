@@ -4,7 +4,7 @@ const Transaction = require("../models/transaction_model");
 const Focus9DailySummary = require("../models/focus9_daily_summary_model");
 const JobExecutionLog = require("../models/job_execution_log_model");
 
-const OMAN_TIMEZONE = "Asia/Muscat";
+const { OMAN_TIMEZONE } = require("../utils/date");
 const POINTS_TO_OMR = 1000; // 1000 points = 1 OMR
 
 /**

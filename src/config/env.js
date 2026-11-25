@@ -40,4 +40,14 @@ module.exports = {
     // UAT-only FOCUS SQL row delete (optional override; otherwise uses IMAGE_SERVER_ENV)
     FOCUS_SQL_DELETE_ENABLED: process.env.FOCUS_SQL_DELETE_ENABLED,
     IMAGE_SERVER_ENV: process.env.IMAGE_SERVER_ENV,
+
+    // Oman timezone standardisation, Phase 3 (business rules: earn caps,
+    // offer usage periods, tier eligibility periods).
+    //   "off" (default) - old UTC-boundary behaviour, unchanged.
+    //   "log"            - compute both old and new boundaries, log every
+    //                      case where they diverge, but still APPLY the old
+    //                      boundary. Use this to measure blast radius on UAT
+    //                      before flipping to "on".
+    //   "on"             - apply the new Oman-boundary behaviour.
+    OMAN_TZ_BUSINESS_RULES: process.env.OMAN_TZ_BUSINESS_RULES || 'off',
 }; 

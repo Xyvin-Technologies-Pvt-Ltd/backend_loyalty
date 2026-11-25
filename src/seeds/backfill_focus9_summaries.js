@@ -18,7 +18,7 @@ const {
   closePool,
 } = require("../services/focus9_sql_sync.service");
 
-const OMAN_TIMEZONE = "Asia/Muscat";
+const { OMAN_TIMEZONE } = require("../utils/date");
 const MAX_BACKFILL_DAYS = 120;
 
 function parseArg(name) {

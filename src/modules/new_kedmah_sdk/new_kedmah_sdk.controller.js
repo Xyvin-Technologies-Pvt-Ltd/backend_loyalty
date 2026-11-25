@@ -16,6 +16,7 @@ const TierEligibilityCriteria = require("../../models/tier_eligibility_criteria_
 const CouponBrand = require("../../models/coupon_brand_model");
 const CouponCategory = require("../../models/coupon_category_model");
 const moment = require("moment-timezone");
+const { OMAN_TIMEZONE } = require("../../utils/date");
 
 // Legacy image CDN that older documents were saved with. Keep this constant in
 // one place so it can be swapped for the current host in a single line.
@@ -1391,7 +1392,7 @@ const getTransactionHistory = async (req, res) => {
         description: transaction.note || "Transaction",
         points: Math.abs(transaction.points),
         date: moment(transaction.transaction_date)
-          .tz("Asia/Muscat")
+          .tz(OMAN_TIMEZONE)
           .format("DD/MM/YY HH:mm"),
         transaction_id: transaction.transaction_id,
         status: transaction.status,

@@ -15,7 +15,7 @@ const Focus9DailySummary = require("../models/focus9_daily_summary_model");
 const { connectDatabase, disconnectDatabase } = require("../config/database");
 const { logger } = require("../middlewares/logger");
 
-const OMAN_TIMEZONE = "Asia/Muscat";
+const { OMAN_TIMEZONE } = require("../utils/date");
 const POINTS_TO_OMR = 1000;
 
 function parseDateArg() {

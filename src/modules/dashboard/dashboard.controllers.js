@@ -6,6 +6,7 @@ const CouponBrand = require("../../models/coupon_brand_model");
 const Transaction = require("../../models/transaction_model");
 const { logger } = require("../../middlewares/logger");
 const response_handler = require("../../helpers/response_handler");
+const { OMAN_TIMEZONE } = require("../../utils/date");
 
 /**
  * Get dashboard statistics
@@ -88,8 +89,10 @@ const getDashboardStats = async (req, res) => {
       {
         $group: {
           _id: {
-            year: { $year: "$createdAt" },
-            month: { $month: "$createdAt" },
+            // Grouped in Oman time — without this, month buckets shift for
+            // signups near a UTC month boundary that isn't an Oman one.
+            year: { $year: { date: "$createdAt", timezone: OMAN_TIMEZONE } },
+            month: { $month: { date: "$createdAt", timezone: OMAN_TIMEZONE } },
           },
           count: { $sum: 1 },
         },
@@ -116,8 +119,14 @@ const getDashboardStats = async (req, res) => {
       {
         $group: {
           _id: {
+            // Grouped in Oman time so the 02:00-Oman expiry batch (and any
+            // other activity near midnight UTC) lands on the correct Oman day.
             date: {
-              $dateToString: { format: "%Y-%m-%d", date: "$transaction_date" },
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$transaction_date",
+                timezone: OMAN_TIMEZONE,
+              },
             },
             type: "$transaction_type",
           },

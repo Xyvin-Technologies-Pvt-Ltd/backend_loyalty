@@ -6,6 +6,7 @@ const { logger } = require("../../middlewares/logger");
 const response_handler = require("../../helpers/response_handler");
 const mongoose = require("mongoose");
 const XLSX = require("xlsx");
+const { resolveOmanDateRange, formatOmanDate } = require("../../utils/date");
 /**
  * Create a new customer
  * @param {Object} req - Express request object
@@ -116,15 +117,16 @@ const getAllCustomers = async (req, res) => {
       filter.tier = new mongoose.Types.ObjectId(tier_id);
     }
     if (start_date || end_date) {
+      // Resolved as Oman day boundaries — setHours(23,59,59,999) widens to
+      // end of day, but in server-local (UTC) time, ~4h off from Oman.
+      const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+        start_date,
+        end_date,
+        { fallback: "none" }
+      );
       filter.createdAt = {};
-      if (start_date) {
-        filter.createdAt.$gte = new Date(start_date);
-      }
-      if (end_date) {
-        const endDate = new Date(end_date);
-        endDate.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = endDate;
-      }
+      if (gte) filter.createdAt.$gte = gte;
+      if (lte) filter.createdAt.$lte = lte;
     }
     if (min_points !== undefined || max_points !== undefined) {
       filter.total_points = {};
@@ -249,15 +251,16 @@ const exportCustomersToCsv = async (req, res) => {
       filter.tier = new mongoose.Types.ObjectId(tier_id);
     }
     if (start_date || end_date) {
+      // Resolved as Oman day boundaries — setHours(23,59,59,999) widens to
+      // end of day, but in server-local (UTC) time, ~4h off from Oman.
+      const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+        start_date,
+        end_date,
+        { fallback: "none" }
+      );
       filter.createdAt = {};
-      if (start_date) {
-        filter.createdAt.$gte = new Date(start_date);
-      }
-      if (end_date) {
-        const endDate = new Date(end_date);
-        endDate.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = endDate;
-      }
+      if (gte) filter.createdAt.$gte = gte;
+      if (lte) filter.createdAt.$lte = lte;
     }
     if (min_points !== undefined || max_points !== undefined) {
       filter.total_points = {};
@@ -336,7 +339,9 @@ const exportCustomersToCsv = async (req, res) => {
     const csvBody = rowsToCsv([header, ...dataRows]);
     const csvBuffer = Buffer.from(`\uFEFF${csvBody}`, "utf8");
 
-    const filename = `customers_export_${new Date().toISOString().split("T")[0]}.csv`;
+    // Oman-local date so the filename reflects the Oman calendar day the
+    // export was actually taken on, not the UTC day.
+    const filename = `customers_export_${formatOmanDate(new Date(), "YYYY-MM-DD")}.csv`;
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 

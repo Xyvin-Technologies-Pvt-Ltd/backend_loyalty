@@ -1,6 +1,7 @@
 const CouponCode = require("../../../models/merchant_offers.model");
 const response_handler = require("../../../helpers/response_handler");
 const { logger } = require("../../../middlewares/logger");
+const { resolveOmanDateRange } = require("../../../utils/date");
 
 exports.getAvailableOffers = async (req, res) => {
   try {
@@ -31,13 +32,14 @@ exports.getAvailableOffers = async (req, res) => {
       query.couponCategoryId = category_id;
     }
     if (start_date || end_date) {
+      const { startDate: gte, endDate: lte } = resolveOmanDateRange(
+        start_date,
+        end_date,
+        { fallback: "none" }
+      );
       query.validityPeriod = {};
-      if (start_date) {
-        query.validityPeriod.startDate = { $gte: new Date(start_date) };
-      }
-      if (end_date) {
-        query.validityPeriod.endDate = { $lte: new Date(end_date) };
-      }
+      if (gte) query.validityPeriod.startDate = { $gte: gte };
+      if (lte) query.validityPeriod.endDate = { $lte: lte };
     }
 
     // Calculate pagination
